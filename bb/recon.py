@@ -149,6 +149,27 @@ def passive_subdomains(domain: str, *, fetch=_http_get_json):
     return subs, errors
 
 
+def passive_urls(domain: str, scope: Scope, *, fetch=_http_get_json, limit: int = 3000):
+    """URLs historiques via l'API Wayback CDX (passif/OSINT). Re-filtrées par scope.
+
+    Multiplicateur de surface : IDOR, open redirect, XSS réfléchi, fichiers oubliés
+    vivent dans des URL paramétrées que seul Wayback révèle. Aucun paquet vers la cible.
+    """
+    url = (f"http://web.archive.org/cdx/search/cdx?url=*.{domain}/*"
+           f"&output=json&fl=original&collapse=urlkey&limit={limit}")
+    try:
+        rows = fetch(url)
+    except Exception:  # noqa: BLE001
+        return [], ["wayback: erreur"]
+    urls = []
+    for row in (rows or [])[1:]:  # 1re ligne = en-tête
+        u = row[0] if isinstance(row, list) and row else (row if isinstance(row, str) else "")
+        host = normalize_host(u)
+        if host and scope.allows(host):  # défense en profondeur (une URL peut sortir du scope)
+            urls.append(u)
+    return sorted(set(urls)), []
+
+
 # ── Probe HTTP (actif léger, in-scope only) ─────────────────────────────────
 @dataclass
 class HostResult:
@@ -160,6 +181,11 @@ class HostResult:
     scheme: str = ""
     redirect: str = ""
     error: str = ""
+    tech: list = field(default_factory=list)
+    favicon: str = ""
+    cdn: str = ""
+    ip: str = ""
+    cname: str = ""
     findings: list = field(default_factory=list)
 
 
@@ -201,7 +227,8 @@ def _probe_httpx(hosts, timeout: int = 120):
     try:
         out = subprocess.run(
             [pd_path("httpx") or "httpx", "-silent", "-json", "-status-code", "-title",
-             "-web-server", "-no-color", "-disable-redirects"],
+             "-web-server", "-tech-detect", "-favicon", "-cdn", "-ip", "-cname",
+             "-no-color", "-disable-redirects", "-rate-limit", "100"],
             input="\n".join(hosts), capture_output=True, text=True, timeout=timeout)
     except (subprocess.SubprocessError, OSError):
         return [_probe_requests(h) for h in hosts]  # fallback Python, pas d'échec silencieux
@@ -213,10 +240,16 @@ def _probe_httpx(hosts, timeout: int = 120):
             continue
         raw = d.get("input") or d.get("host") or d.get("url") or ""
         host = raw.split("://")[-1].split("/")[0].split(":")[0].lower()
+
+        def _first(v):
+            return (v[0] if isinstance(v, list) and v else v) or ""
+
         seen[host] = HostResult(
             host=host, alive=True, status=d.get("status_code") or d.get("status-code"),
             title=(d.get("title") or "")[:120], server=d.get("webserver", ""),
-            scheme=d.get("scheme", ""))
+            scheme=d.get("scheme", ""), tech=d.get("tech") or [],
+            favicon=str(d.get("favicon") or ""), cdn=d.get("cdn_name") or "",
+            ip=_first(d.get("a")) or d.get("ip") or "", cname=_first(d.get("cname")))
     return [seen.get(h, HostResult(host=h, alive=False)) for h in hosts]
 
 
@@ -227,8 +260,13 @@ def _scan_nuclei(results, scope: Scope, timeout: int = 600):
         return
     urls = "\n".join(f"{r.scheme or 'https'}://{r.host}" for r in alive)
     try:
-        out = subprocess.run([pd_path("nuclei") or "nuclei", "-silent", "-jsonl", "-duc"],
-                             input=urls, capture_output=True, text=True, timeout=timeout)
+        out = subprocess.run(
+            [pd_path("nuclei") or "nuclei", "-silent", "-jsonl", "-duc",
+             # Ciblé sur les classes rentables débutant (pas les ~9000 templates par défaut),
+             # severity sans 'info' (spam), rate-limit pour rester poli (anti-ban).
+             "-tags", "exposure,misconfig,takeover,default-login,cve",
+             "-severity", "low,medium,high,critical", "-rate-limit", "50"],
+            input=urls, capture_output=True, text=True, timeout=timeout)
     except (subprocess.SubprocessError, OSError):
         return
     by_host = {r.host: r for r in alive}
@@ -284,7 +322,8 @@ def basic_checks(result: HostResult, scope: Scope, *, get=_get) -> list:
 
 # ── Orchestration ───────────────────────────────────────────────────────────
 def run(domain: str, scope: Scope, *, passive_only: bool = False, do_checks: bool = True,
-        do_scan: bool = False, prober=None, use_tools: bool = True) -> dict:
+        do_scan: bool = False, prober=None, use_tools: bool = True,
+        collect_urls: bool = True) -> dict:
     """Recon → probe → (checks/scan). Tout est filtré par le scope à chaque étape.
 
     Hybride : `prober=None` + httpx présent → httpx (Go) ; sinon fallback requests.
@@ -292,11 +331,17 @@ def run(domain: str, scope: Scope, *, passive_only: bool = False, do_checks: boo
     """
     subs, passive_errors = passive_subdomains(domain)
     in_scope, rejected = enforce_scope(subs | {domain}, scope)
+    urls = []
+    if collect_urls:
+        urls, url_errs = passive_urls(domain, scope)
+        passive_errors = passive_errors + url_errs
     report = {
         "domain": domain,
         "discovered": len(subs),
         "in_scope": len(in_scope),
         "rejected": len(rejected),
+        "urls": len(urls),
+        "url_list": urls[:500],
         "passive_errors": passive_errors,  # remontée explicite (pas de silence)
         "tools": {n: pd_tool(n) for n in ("subfinder", "httpx", "nuclei")},
         "hosts": [],

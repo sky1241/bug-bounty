@@ -30,12 +30,25 @@ def test_probe_never_touches_out_of_scope():
     assert "evil.com" in rej and "x.attacker.io" in rej
 
 
+def test_passive_urls_filtered_by_scope():
+    from bb.recon import passive_urls
+    rows = [["original"],                                   # en-tête CDX
+            ["https://app.example.com/a?id=1"],
+            ["https://evil.com/x"],                          # hors-scope
+            ["http://shop.example.com/b"]]
+    urls, errs = passive_urls("example.com", Scope(in_scope=["*.example.com"]), fetch=lambda u: rows)
+    assert "https://app.example.com/a?id=1" in urls
+    assert "http://shop.example.com/b" in urls
+    assert all("evil.com" not in u for u in urls)            # défense en profondeur
+    assert errs == []
+
+
 def test_run_passive_only_never_probes(monkeypatch):
     import bb.recon as recon
     touched = []
     monkeypatch.setattr(recon, "passive_subdomains", lambda d, **k: ({"a.example.com", "evil.com"}, []))
     scope = Scope(in_scope=["*.example.com"])
-    rep = recon.run("example.com", scope, passive_only=True,
+    rep = recon.run("example.com", scope, passive_only=True, collect_urls=False,
                     prober=lambda h: (touched.append(h), HostResult(host=h))[1])
     assert touched == []                    # passif = zéro paquet actif
     assert rep["in_scope"] >= 1 and rep["rejected"] >= 1
@@ -52,7 +65,7 @@ def test_run_filters_then_probes(monkeypatch):
         return HostResult(host=host, alive=True, status=200)
 
     scope = Scope(in_scope=["*.example.com"])
-    rep = recon.run("example.com", scope, do_checks=False, prober=fake_prober)
+    rep = recon.run("example.com", scope, do_checks=False, collect_urls=False, prober=fake_prober)
     assert "evil.com" not in touched
     assert set(touched) == {"a.example.com", "b.example.com"}
     assert rep["alive"] == 2
