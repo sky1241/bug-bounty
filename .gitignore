@@ -24,3 +24,8 @@ results/
 # Scopes telecharges (cache local, re-fetchables)
 data/programs/*.json
 !data/programs/.gitkeep
+
+# Journal des tests : local par securite (peut contenir cibles/findings).
+# Retire ces 2 lignes si tu veux versionner ton historique.
+journal/*.jsonl
+!journal/.gitkeep

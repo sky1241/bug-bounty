@@ -6,7 +6,7 @@ import json
 import sys
 from pathlib import Path
 
-from . import aggregate, recon as recon_mod, report as report_mod, sources
+from . import aggregate, journal, recon as recon_mod, report as report_mod, sources
 from .scope import Scope, normalize_host
 
 
@@ -63,12 +63,37 @@ def main(argv=None) -> int:
     re_.add_argument("--scan", action="store_true", help="lancer nuclei si présent (plus intrusif)")
     re_.add_argument("--out", help="écrire le rapport JSON")
 
+    jp = sub.add_parser("journal", help="historique des tests (le « dictionnaire » du projet)")
+    jp.add_argument("action", nargs="?", default="summary", choices=["summary", "list", "add"])
+    jp.add_argument("--type", dest="jtype", choices=list(journal.TYPES))
+    jp.add_argument("--target", default="")
+    jp.add_argument("--note", default="")
+    jp.add_argument("--grep", default="")
+    jp.add_argument("--limit", type=int, default=30)
+
     args = ap.parse_args(argv)
 
     if args.cmd == "update":
         print("Téléchargement des feeds (bounty-targets-data + API YesWeHack)…")
         sources.update()
         print("OK. Cache: data/programs/")
+        return 0
+
+    if args.cmd == "journal":
+        if args.action == "add":
+            e = journal.record(args.jtype or "note", args.target, note=args.note)
+            print(f"Ajouté: {e['ts']} [{e['type']}] {e['target']} {e.get('note', '')}")
+            return 0
+        if args.action == "list":
+            rows = journal.search(args.grep, args.jtype)[-args.limit:]
+            for e in rows:
+                extra = e.get("title") or e.get("note") or ""
+                print(f"{e['ts']} [{e['type']:14}] {e.get('target', ''):32} {extra}")
+            print(f"\n{len(rows)} événement(s)")
+            return 0
+        s = journal.summary()
+        print(f"Journal: {s['events']} événements | par type: {s['by_type']}")
+        print(f"Cibles ({len(s['targets'])}): {', '.join(s['targets'][:20])}")
         return 0
 
     if args.cmd == "report":
@@ -88,6 +113,9 @@ def main(argv=None) -> int:
         except report_mod.ReportNotValidated as e:
             print(f"⛔ {e}", file=sys.stderr)
             return 2
+        journal.record("report", finding.asset_url, title=finding.title,
+                       severity=report_mod.cvss_label(finding.cvss_score),
+                       validated=validation.complete())
         if args.out:
             Path(args.out).write_text(md)
             print(f"Rapport écrit: {args.out}")
@@ -120,6 +148,9 @@ def main(argv=None) -> int:
               f"rejetés={rep['rejected']} vivants={rep.get('alive', '-')}  outils={rep['tools']}")
         if rep.get("passive_errors"):
             print(f"  ⚠️  sources passives en échec: {', '.join(rep['passive_errors'])}", file=sys.stderr)
+        journal.record("recon", domain, in_scope=rep["in_scope"], rejected=rep["rejected"],
+                       alive=rep.get("alive"), passive_errors=rep.get("passive_errors") or [],
+                       findings=sum(len(h.get("findings", [])) for h in rep["hosts"]))
         for h in rep["hosts"][:40]:
             line = f"  {h['host']}"
             if h.get("status"):

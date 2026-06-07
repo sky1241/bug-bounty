@@ -1,0 +1,20 @@
+# Isolation par projet : ce projet a sa propre image + ses volumes.
+# Lancer : docker compose run --rm bb <commande bb>
+#   ex : docker compose run --rm bb list --starter --fr
+#        docker compose run --rm bb recon example.com --program acme --scan
+#        docker compose run --rm bb journal
+
+services:
+  bb:
+    build: .
+    image: bug-bounty:latest
+    container_name: bug-bounty
+    volumes:
+      - ./data:/app/data          # cache des feeds (persistant)
+      - ./journal:/app/journal    # le « dictionnaire » / historique (persistant)
+      - ./output:/app/output      # sorties recon/scan (persistant)
+      - nuclei-templates:/root/nuclei-templates
+    # Le conteneur a son propre réseau (pas de network: host) → cloisonné.
+
+volumes:
+  nuclei-templates:
