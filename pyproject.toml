@@ -1,0 +1,10 @@
+[project]
+name = "bug-bounty"
+version = "0.1.0"
+description = "Outillage personnel de bug bounty (in-scope only)"
+requires-python = ">=3.10"
+
+[tool.pytest.ini_options]
+pythonpath = ["."]
+testpaths = ["tests"]
+addopts = "-q"

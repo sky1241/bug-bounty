@@ -1,5 +1,6 @@
 # ── Stage 1 : outils recon ProjectDiscovery (Go) ────────────────────────────
-FROM golang:1.23-alpine AS pdtools
+FROM golang:1.24-alpine AS pdtools
+ENV GOTOOLCHAIN=auto
 RUN apk add --no-cache git
 RUN go install github.com/projectdiscovery/subfinder/v2/cmd/subfinder@latest \
  && go install github.com/projectdiscovery/httpx/cmd/httpx@latest \

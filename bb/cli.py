@@ -6,7 +6,8 @@ import json
 import sys
 from pathlib import Path
 
-from . import aggregate, fleet, journal, recon as recon_mod, report as report_mod, sources
+from . import (aggregate, doctor, engagement, fleet, journal, recon as recon_mod,
+               report as report_mod, sources)
 from .scope import Scope, normalize_host
 
 
@@ -65,6 +66,12 @@ def main(argv=None) -> int:
     re_.add_argument("--json", action="store_true", help="sortir le JSON sur stdout (mode worker)")
     re_.add_argument("--out", help="écrire le rapport JSON dans un fichier")
 
+    cp = sub.add_parser("scan", help="évalue un programme et prépare l'engagement (clé en main)")
+    cp.add_argument("program")
+    cp.add_argument("--go", action="store_true", help="créer le dossier d'engagement + vérifier les outils")
+
+    sub.add_parser("doctor", help="vérifie que tous les outils nécessaires sont installés")
+
     fp = sub.add_parser("fleet", help="recon distribué sur la fleet (sky-master + cousins)")
     fp.add_argument("program", help="nom du programme (scope + domaines in-scope)")
     fp.add_argument("--nodes", default="local", help="alias SSH séparés par virgule (ex: pc1,pc3,local)")
@@ -85,6 +92,54 @@ def main(argv=None) -> int:
         print("Téléchargement des feeds (bounty-targets-data + API YesWeHack)…")
         sources.update()
         print("OK. Cache: data/programs/")
+        return 0
+
+    if args.cmd == "doctor":
+        rep = doctor.check()
+        print("Python :", {k: ("OK" if v else "MANQUANT") for k, v in rep["python_deps"].items()})
+        print("Outils PD :", {k: (v if v else "absent") for k, v in rep["pd_tools"].items()})
+        for w in rep["warnings"]:
+            print(f"  ⚠️  {w}")
+        print("\n" + ("✅ PRÊT à scanner" if rep["ready"] else "❌ PAS PRÊT (installe les deps requises)"))
+        return 0 if rep["ready"] else 1
+
+    if args.cmd == "scan":
+        feeds, ywh_api = sources.load()
+        if not feeds:
+            print("Aucun feed en cache. Lance `bb update`.", file=sys.stderr)
+            return 1
+        progs = aggregate.aggregate(feeds)
+        aggregate.enrich_ywh(progs, ywh_api)
+        q = args.program.lower()
+        m = [p for p in progs if q in p.name.lower() or q in p.handle.lower()]
+        if not m:
+            print(f"Programme '{args.program}' introuvable (lance `bb update`).", file=sys.stderr)
+            return 1
+        p = m[0]
+        interesting = p.pays_cash and p.web_surface and p.is_open and p.starter_score >= 5
+        verdict = "INTÉRESSANT ✅" if interesting else "moyen / à évaluer"
+        print(f"{p.name} [{p.platform}] prime={p.bounty_str} score={p.starter_score:.0f} "
+              f"pays={p.country or '?'}  →  {verdict}")
+        print(f"  scope: {p.in_scope_count} règles ({p.wildcard_count} wildcards), "
+              f"web={p.web_surface}, cash={p.pays_cash}")
+        seen = engagement.exists(p.name)
+        prev = journal.search(p.name, "recon")
+        if seen or prev:
+            print(f"  ⚠️  déjà vu (engagement={'oui' if seen else 'non'}, "
+                  f"{len(prev)} recon(s) au journal) — on évite le re-scan inutile.")
+        if not args.go:
+            print("  → ajoute --go pour créer le dossier d'engagement et vérifier les outils.")
+            return 0
+        drep = doctor.check()
+        if not drep["ready"]:
+            print("  ❌ doctor: dépendances manquantes — `bb doctor` pour le détail.", file=sys.stderr)
+            return 1
+        d = engagement.create(p.name, p.scope)
+        journal.record("note", p.name, note=f"engagement créé ({d.name})", engagement=str(d))
+        tools = ", ".join(t for t, v in drep["pd_tools"].items() if v) or "fallback Python"
+        print(f"  ✅ Engagement prêt: {d}")
+        print(f"     Outils dispo: {tools}")
+        print(f"     → recon distribué: bb fleet \"{p.name}\" --nodes pc1,pc3,local")
         return 0
 
     if args.cmd == "fleet":

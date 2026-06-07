@@ -69,6 +69,26 @@ def test_yeswehack_regex_style_scope():
     assert not s.allows("shop.decathlon.com")      # host hors scope
 
 
+def test_ip_forms_canonicalized():
+    """Chaque forme d'IP doit être canonicalisée (tue les mutants _as_ip)."""
+    from bb.scope import _as_ip
+    assert normalize_host("2130706433") == "127.0.0.1"   # décimal entier
+    assert normalize_host("0x7f000001") == "127.0.0.1"   # hexadécimal
+    assert normalize_host("0177.0.0.1") == "127.0.0.1"   # octal (inet_aton)
+    assert normalize_host("127.0.0.1") == "127.0.0.1"    # dotted
+    assert _as_ip("[::1]") == "::1"                       # IPv6 entre crochets
+    assert _as_ip("pas-une-ip") is None
+
+
+def test_empty_pattern_never_matches():
+    """Un pattern vide ne doit JAMAIS matcher (tue le mutant L137 False->True)."""
+    from bb.scope import _pattern_matches
+    assert _pattern_matches("example.com", "") is False
+    assert _pattern_matches("example.com", "   ") is False
+    # défense réelle : un scope avec un pattern vide n'autorise rien
+    assert not Scope(in_scope=[""]).allows("example.com")
+
+
 def test_audit_regressions_no_scope_leak():
     """Cas issus de l'audit adversarial : aucun ne doit autoriser une cible hors-scope."""
     # Wildcard '*' ne traverse JAMAIS les points
