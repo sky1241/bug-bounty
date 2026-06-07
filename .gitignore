@@ -1,0 +1,26 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+.pytest_cache/
+.mypy_cache/
+
+# MUNINN local state (mycelium, ne pas committer)
+.muninn/
+
+# Secrets / config locale
+.env
+*.local.yml
+secrets.yml
+
+# Sorties de recon/scan (peuvent contenir des donnees de cibles)
+output/
+results/
+*.recon.json
+*.scan.json
+
+# Scopes telecharges (cache local, re-fetchables)
+data/programs/*.json
+!data/programs/.gitkeep

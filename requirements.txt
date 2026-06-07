@@ -1,0 +1,11 @@
+# Core
+requests>=2.31
+PyYAML>=6.0
+rich>=13.0          # affichage CLI lisible
+tldextract>=5.0     # parsing robuste de domaines (scope guard)
+
+# Dev
+pytest>=8.0
+
+# NB: les outils de recon (subfinder, httpx, nuclei, ...) sont des binaires Go,
+# PAS des paquets pip. Ils seront installés séparément (voir docs à venir).

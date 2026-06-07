@@ -1,0 +1,830 @@
+[
+  {
+    "bypassClass": "host-normalization",
+    "in_scope": [
+      "allowed.com"
+    ],
+    "out_of_scope": [],
+    "target": "http://evil.com\\@allowed.com",
+    "expected_allows": false,
+    "severity": "critical",
+    "rationale": "VERIFIE: normalize_host renvoie 'allowed.com'. Python urlparse garde le '\\' litteral et parse 'evil.com\\' comme userinfo, donc host='allowed.com' -> guard ALLOWS. Mais les parseurs WHATWG/navigateurs traitent '\\' comme '/', faisant de 'evil.com' l'authorite reelle. Le guard autorise un scan dont l'hote reel ('evil.com') est HORS scope. Divergence urlparse vs client HTTP reel = fuite de scope."
+  },
+  {
+    "bypassClass": "host-normalization",
+    "in_scope": [
+      "*.example.com"
+    ],
+    "out_of_scope": [
+      "admin.example.com"
+    ],
+    "target": "admin.example.com\nshop.example.com",
+    "expected_allows": false,
+    "severity": "critical",
+    "rationale": "VERIFIE: normalize_host supprime le newline -> 'admin.example.comshop.example.com'. Le pattern out-of-scope 'admin.example.com' est 'plat' (comparaison stricte d'egalite) donc echoue. Mais le pattern in-scope '*.example.com' compile en '^(?:.+\\.example\\.com)$' et MATCHE la chaine fusionnee -> allows()==True. La regle out-of-scope (qui doit l'emporter) est totalement contournee par injection de newline. Une cible visant l'admin explicitement hors-scope passe."
+  },
+  {
+    "bypassClass": "host-normalization",
+    "in_scope": [
+      "*.example.com"
+    ],
+    "out_of_scope": [],
+    "target": "*",
+    "expected_allows": false,
+    "severity": "critical",
+    "rationale": "VERIFIE sur aggregate._patterns/categorize: categorize('','*')=='web' et _patterns([('*','')])==['*']. Un asset de feed valant '*' produit le pattern '*' -> compile en '^(?:.+)$' qui matche TOUT host. Un programme dont un asset in_scope est '*' (donnee de feed malformee/abusive) autorise l'internet entier. Note: ici on teste la cible '*' elle-meme contre un scope normal qui ne devrait pas l'autoriser; le vrai danger est cote construction de scope, mais le mecanisme '.+' est demontre executable."
+  },
+  {
+    "bypassClass": "host-normalization",
+    "in_scope": [
+      "*.com"
+    ],
+    "out_of_scope": [],
+    "target": "evil.com",
+    "expected_allows": false,
+    "severity": "critical",
+    "rationale": "VERIFIE: _patterns([('*.com','')])==['*.com','com']. Le wildcard '*.com' compile en '^(?:.+\\.com)$' et matche 'evil.com'. Un asset de feed du type '*.com' (ou tout TLD entier) ouvre le guard a tout le TLD .com plus l'apex 'com'. Un domaine arbitraire hors perimetre reel devient autorise. Construction de pattern trop large directement issue du code aggregate."
+  },
+  {
+    "bypassClass": "host-normalization",
+    "in_scope": [
+      "allowed.com"
+    ],
+    "out_of_scope": [],
+    "target": "http://allowed.com@evil.com",
+    "expected_allows": false,
+    "severity": "high",
+    "rationale": "VERIFIE: normalize_host renvoie 'evil.com' (urlparse parse 'allowed.com' comme userinfo). Ici le guard se comporte CORRECTEMENT: allows()==False car 'evil.com' n'est pas in-scope. expected_allows=false ET le guard refuse => pas un bug. Inclus comme cas de controle prouvant que le piege userinfo classique est gere par urlparse dans CE sens; le bug n'apparait qu'avec le backslash (cas separe)."
+  },
+  {
+    "bypassClass": "host-normalization",
+    "in_scope": [
+      "*.example.com"
+    ],
+    "out_of_scope": [],
+    "target": "SHOP.EXAMPLE.COM:8443",
+    "expected_allows": true,
+    "severity": "low",
+    "rationale": "VERIFIE: normalize_host lower-case et strip le port -> 'shop.example.com', allows()==True. Comportement correct: la casse et le port n'ouvrent ni ne ferment indument le scope. Cas de controle confirmant la normalisation saine casse+port (pas de bug)."
+  },
+  {
+    "bypassClass": "host-normalization",
+    "in_scope": [
+      "*.example.com"
+    ],
+    "out_of_scope": [],
+    "target": "shop.example.com.",
+    "expected_allows": true,
+    "severity": "low",
+    "rationale": "VERIFIE: normalize_host fait .rstrip('.') -> 'shop.example.com', allows()==True. Le trailing dot (FQDN absolu) est correctement neutralise et ne casse pas un match in-scope legitime. Pas de bug. Note de symetrie: ce meme rstrip n'aide PAS l'evasion out-of-scope car le point final est retire des deux cotes."
+  },
+  {
+    "bypassClass": "host-normalization",
+    "in_scope": [
+      "*.example.com"
+    ],
+    "out_of_scope": [],
+    "target": "http://shop.example%2ecom/",
+    "expected_allows": true,
+    "severity": "medium",
+    "rationale": "VERIFIE: urlparse ne decode PAS le %2e, normalize_host renvoie 'shop.example%2ecom', allows()==False. C'est un FAUX NEGATIF: une cible in-scope legitime ecrite avec un point URL-encode est refusee a tort. Severite medium (refus a tort = on rate une cible valide, pas de fuite). Cote securite c'est le bon sens du fail (conservateur), donc pas critique, mais c'est une incoherence de normalisation."
+  },
+  {
+    "bypassClass": "host-normalization",
+    "in_scope": [
+      "example.com"
+    ],
+    "out_of_scope": [],
+    "target": "shop.exаmple.com",
+    "expected_allows": false,
+    "severity": "low",
+    "rationale": "VERIFIE: le 'а' est un cyrillique (homoglyphe). normalize_host renvoie 'shop.exаmple.com' (unicode non transforme), allows()==False. Comportement correct du point de vue securite: un host homoglyphe qui RESSEMBLE a example.com mais ne l'est pas est refuse. Pas de fuite. Inclus pour montrer que le guard ne fait pas de match naif sur l'apparence; faux-negatif benin si jamais un programme listait reellement un IDN unicode."
+  },
+  {
+    "bypassClass": "host-normalization",
+    "in_scope": [
+      "*.example.com"
+    ],
+    "out_of_scope": [],
+    "target": "http://https://evil.com",
+    "expected_allows": false,
+    "severity": "medium",
+    "rationale": "VERIFIE: normalize_host renvoie 'https' (urlparse prend 'https' comme host de '//https://evil.com' apres ajout de schema). allows()==False (refuse). Securite OK ici (pas de fuite vers evil.com) mais comportement fragile: la cible reelle 'evil.com' est silencieusement transformee en host bidon 'https'. Si un pattern in_scope valait par malchance 'https', il y aurait fuite. Cas de controle du double-schema, pas un bug exploitable en l'etat."
+  },
+  {
+    "bypassClass": "host-normalization",
+    "in_scope": [
+      "*.example.com"
+    ],
+    "out_of_scope": [],
+    "target": "http://[evil.com",
+    "expected_allows": false,
+    "severity": "low",
+    "rationale": "VERIFIE: crochet IPv6 non ferme -> urlparse leve ValueError, normalize_host catch et renvoie '' -> allows()==False. Comportement defensif correct (le code commente explicitement ce cas 'Invalid IPv6 URL'). Pas de fuite, pas de crash. Cas de controle du host entre crochets."
+  },
+  {
+    "bypassClass": "host-normalization",
+    "in_scope": [
+      "*.example.com"
+    ],
+    "out_of_scope": [
+      "admin.example.com"
+    ],
+    "target": "evil.com.example.com",
+    "expected_allows": true,
+    "severity": "medium",
+    "rationale": "VERIFIE: '*.example.com' compile en '^(?:.+\\.example\\.com)$' (wildcard='.+', >=1 label sans borne gauche). 'evil.com.example.com' matche -> allows()==True. C'est techniquement un vrai sous-domaine de example.com donc in-scope LEGITIME (expected_allows=true). MAIS le '.+' greedy sans ancrage de label est exactement le mecanisme qui, combine a l'injection de newline (cas critique #2), permet l'evasion: la borne gauche '.+' avale n'importe quoi y compris une chaine fusionnee. Severite medium car le pattern '.+' (au lieu de '[^.]+' ou '([^.]+\\.)+') est la racine du contournement out-of-scope."
+  },
+  {
+    "bypassClass": "IPv4/IPv6 alternate encodings &amp; numeric IP formats (octal/hex/decimal-int, bracketed/bare IPv6, port, CIDR, 0.0.0.0) — no IP canonicalization in normalize_host/_pattern_matches; pure string/regex compare",
+    "in_scope": [
+      "https://*"
+    ],
+    "out_of_scope": [
+      "10.0.0.5"
+    ],
+    "target": "167772165",
+    "expected_allows": false,
+    "severity": "critical",
+    "rationale": "167772165 == decimal-integer form de 10.0.0.5 (10*2^24+5). Le programme a un asset catch-all 'https://*' qui compile en '^(?:https://.+)$'... non, en realite _compile_pattern strippe le schema -> pattern '*' -> '.+' qui matche TOUT host. La seule protection est out_of_scope=['10.0.0.5'] (compare en string brute). normalize_host('167772165')='167772165', _pattern_matches('167772165','10.0.0.5') compare deux strings differentes -> False -> non bloque -> matche '.+' in_scope -> allows()==True. VERIFIE: allows()=True, reason='AUTORISE: 167772165 matche in-scope https://*'. L'IP interne hors-scope est scannee via son encodage decimal. Fuite => scan illegal d'un host explicitement exclu."
+  },
+  {
+    "bypassClass": "IPv4/IPv6 alternate encodings &amp; numeric IP formats (octal/hex/decimal-int, bracketed/bare IPv6, port, CIDR, 0.0.0.0) — no IP canonicalization in normalize_host/_pattern_matches; pure string/regex compare",
+    "in_scope": [
+      "*"
+    ],
+    "out_of_scope": [
+      "127.0.0.1"
+    ],
+    "target": "2130706433",
+    "expected_allows": false,
+    "severity": "critical",
+    "rationale": "2130706433 == 127.0.0.1 en entier decimal. Aucune canonicalisation IP: normalize_host garde la string telle quelle, _pattern_matches fait une comparaison string/regex. L'OOS '127.0.0.1' ne matche pas la string '2130706433'. in_scope '*' -> regex '.+' matche '2130706433'. VERIFIE: allows('2130706433')=True alors que allows('127.0.0.1')=False. Le localhost out-of-scope est joignable via decimal => SSRF/scan local illegal."
+  },
+  {
+    "bypassClass": "IPv4/IPv6 alternate encodings &amp; numeric IP formats (octal/hex/decimal-int, bracketed/bare IPv6, port, CIDR, 0.0.0.0) — no IP canonicalization in normalize_host/_pattern_matches; pure string/regex compare",
+    "in_scope": [
+      "*"
+    ],
+    "out_of_scope": [
+      "127.0.0.1"
+    ],
+    "target": "0x7f000001",
+    "expected_allows": false,
+    "severity": "critical",
+    "rationale": "0x7f000001 == 127.0.0.1 en hexadecimal (forme acceptee par inet_aton/navigateurs/curl). normalize_host('0x7f000001')='0x7f000001' (lowercased, inchange). OOS string '127.0.0.1' != '0x7f000001'. in_scope '*' -> '.+' matche. VERIFIE: allows()=True. Meme cible reelle que l'OOS, autorisee => contournement du out_of_scope par encodage hex."
+  },
+  {
+    "bypassClass": "IPv4/IPv6 alternate encodings &amp; numeric IP formats (octal/hex/decimal-int, bracketed/bare IPv6, port, CIDR, 0.0.0.0) — no IP canonicalization in normalize_host/_pattern_matches; pure string/regex compare",
+    "in_scope": [
+      "*"
+    ],
+    "out_of_scope": [
+      "127.0.0.1"
+    ],
+    "target": "0177.0.0.1",
+    "expected_allows": false,
+    "severity": "critical",
+    "rationale": "0177.0.0.1 == 127.0.0.1 (0177 octal = 127). Pas de parsing octal: la string reste '0177.0.0.1', differente de l'OOS '127.0.0.1'. in_scope '*' -> '.+' matche. VERIFIE: allows()=True. La forme octale d'un octet contourne l'exclusion out-of-scope."
+  },
+  {
+    "bypassClass": "IPv4/IPv6 alternate encodings &amp; numeric IP formats (octal/hex/decimal-int, bracketed/bare IPv6, port, CIDR, 0.0.0.0) — no IP canonicalization in normalize_host/_pattern_matches; pure string/regex compare",
+    "in_scope": [
+      "*"
+    ],
+    "out_of_scope": [
+      "[2001:db8::1]"
+    ],
+    "target": "2001:db8::1",
+    "expected_allows": false,
+    "severity": "critical",
+    "rationale": "Double bug IPv6. (1) L'entree OOS '[2001:db8::1]' contient '[' et ']' qui sont dans _RX_META -> chemin regex; _compile_pattern garde les crochets LITTERAUX -> '^(?:\\[2001:db8::1\\])$'. (2) La target '2001:db8::1' (bare) passe par normalize_host: urlparse coupe sur ':' -> hostname='2001'... mais meme la target bracketee '[2001:db8::1]' donne host '2001:db8::1' (crochets retires). Donc le host n'a JAMAIS de crochets alors que le pattern OOS les exige -> _pattern_matches=False -> OOS ne bloque jamais. in_scope '*' matche '2001:db8::1' (et '2001'). VERIFIE: allows('[2001:db8::1]')=True ET allows('2001:db8::1')=True alors que les deux DEVRAIENT etre bloques. Les exclusions IPv6 sont totalement inoperantes => scan d'un host IPv6 hors-scope."
+  },
+  {
+    "bypassClass": "IPv4/IPv6 alternate encodings &amp; numeric IP formats (octal/hex/decimal-int, bracketed/bare IPv6, port, CIDR, 0.0.0.0) — no IP canonicalization in normalize_host/_pattern_matches; pure string/regex compare",
+    "in_scope": [
+      "*"
+    ],
+    "out_of_scope": [
+      "127.0.0.1"
+    ],
+    "target": "0.0.0.0",
+    "expected_allows": false,
+    "severity": "high",
+    "rationale": "0.0.0.0 (adresse non-specifiee) route vers localhost sur de nombreuses stacks (Linux la traite souvent comme 'cette machine'). L'OOS ne liste que 127.0.0.1 sous forme dottee; 0.0.0.0 passe le guard via in_scope '*'. VERIFIE: allows('0.0.0.0')=True. Equivalent fonctionnel d'un host hors-scope (loopback/local) autorise. High plutot que critical car 0.0.0.0 n'est pas litteralement l'OOS mais un alias dangereux non couvert."
+  },
+  {
+    "bypassClass": "IPv4/IPv6 alternate encodings &amp; numeric IP formats (octal/hex/decimal-int, bracketed/bare IPv6, port, CIDR, 0.0.0.0) — no IP canonicalization in normalize_host/_pattern_matches; pure string/regex compare",
+    "in_scope": [
+      "127.0.0.1"
+    ],
+    "out_of_scope": [],
+    "target": "2130706433",
+    "expected_allows": true,
+    "severity": "low",
+    "rationale": "Faux negatif. L'asset in-scope est l'IP 127.0.0.1; un testeur ecrit la meme IP en decimal entier (2130706433) -> string differente -> aucune regle in-scope ne matche -> allows()=False. VERIFIE: allows('2130706433')=False alors que c'est le MEME host autorise. Refus a tort d'une cible in-scope. Severite low (le pire est seulement de manquer un test legitime, pas une fuite)."
+  },
+  {
+    "bypassClass": "IPv4/IPv6 alternate encodings &amp; numeric IP formats (octal/hex/decimal-int, bracketed/bare IPv6, port, CIDR, 0.0.0.0) — no IP canonicalization in normalize_host/_pattern_matches; pure string/regex compare",
+    "in_scope": [
+      "[::1]"
+    ],
+    "out_of_scope": [],
+    "target": "[::1]",
+    "expected_allows": true,
+    "severity": "low",
+    "rationale": "Faux negatif IPv6 in-scope. Le pattern '[::1]' contient '[' ']' (dans _RX_META) -> chemin regex -> compile en '^(?:\\[::1\\])$' (crochets litteraux). La target '[::1]' passe normalize_host qui RETIRE les crochets -> host '::1'. Le host '::1' ne matche pas le regex qui attend '[::1]' litteral. VERIFIE: allows('[::1]')=False ET allows('::1')=False alors que [::1] est explicitement in-scope. Un asset IPv6 autorise ne peut JAMAIS etre teste. Low (refus a tort)."
+  },
+  {
+    "bypassClass": "IPv4/IPv6 alternate encodings &amp; numeric IP formats (octal/hex/decimal-int, bracketed/bare IPv6, port, CIDR, 0.0.0.0) — no IP canonicalization in normalize_host/_pattern_matches; pure string/regex compare",
+    "in_scope": [
+      "127.0.0.1"
+    ],
+    "out_of_scope": [],
+    "target": "127.0.0.1:9999",
+    "expected_allows": true,
+    "severity": "low",
+    "rationale": "Sanity/positif: le port est correctement retire. normalize_host('127.0.0.1:9999')='127.0.0.1' (urlparse via prefixe '//') -> match exact in-scope. VERIFIE: allows()=True. Comportement correct, sert de baseline pour distinguer les vrais bugs des cas qui marchent. Note: la gestion du port marche pour les hosts simples mais l'IPv6:port bare casse (urlparse coupe sur ':')."
+  },
+  {
+    "bypassClass": "IPv4/IPv6 alternate encodings &amp; numeric IP formats (octal/hex/decimal-int, bracketed/bare IPv6, port, CIDR, 0.0.0.0) — no IP canonicalization in normalize_host/_pattern_matches; pure string/regex compare",
+    "in_scope": [
+      "10.0.0.0/8"
+    ],
+    "out_of_scope": [],
+    "target": "10.5.5.5",
+    "expected_allows": true,
+    "severity": "medium",
+    "rationale": "CIDR non comprise comme une plage. _compile_pattern fait p.split('/',1)[0] (separe le path) -> '10.0.0.0/8' devient juste '10.0.0.0'. Le pattern ne matche QUE l'adresse reseau exacte. VERIFIE: allows('10.0.0.0')=True mais allows('10.5.5.5')=False alors que .5.5.5 est dans 10.0.0.0/8. C'est un faux negatif (refuse a tort des IP in-scope d'une plage), donc medium. ATTENUATION cote aggregate.py: categorize() classe type='cidr'/'ip' en 'network' (pas 'web') et _patterns() ignore le non-web, donc une CIDR issue d'un feed n'arrive normalement jamais dans Scope. Le bug n'est exploitable que si une CIDR est passee en string a Scope directement, ou si elle est mal typee dans le feed."
+  },
+  {
+    "bypassClass": "IPv4/IPv6 alternate encodings &amp; numeric IP formats (octal/hex/decimal-int, bracketed/bare IPv6, port, CIDR, 0.0.0.0) — no IP canonicalization in normalize_host/_pattern_matches; pure string/regex compare",
+    "in_scope": [
+      "*"
+    ],
+    "out_of_scope": [
+      "10.0.0.0/8"
+    ],
+    "target": "10.99.99.99",
+    "expected_allows": false,
+    "severity": "critical",
+    "rationale": "Inverse du cas precedent et BEAUCOUP plus grave: une plage interne entiere en out_of_scope ne protege presque rien. L'OOS '10.0.0.0/8' est tronquee a '10.0.0.0' par le split path -> ne bloque QUE l'adresse 10.0.0.0 exacte. 10.99.99.99 (dans la plage privee exclue) n'est pas bloque et matche in_scope '*'. VERIFIE par le meme mecanisme (split('/') sur le pattern OOS): allows('10.99.99.99')=True. Toute la plage RFC1918 censee etre hors-scope est scannable => scan illegal massif d'infra interne."
+  },
+  {
+    "bypassClass": "IPv4/IPv6 alternate encodings &amp; numeric IP formats (octal/hex/decimal-int, bracketed/bare IPv6, port, CIDR, 0.0.0.0) — no IP canonicalization in normalize_host/_pattern_matches; pure string/regex compare",
+    "in_scope": [
+      "*.example.com"
+    ],
+    "out_of_scope": [],
+    "target": "93.184.216.34",
+    "expected_allows": false,
+    "severity": "low",
+    "rationale": "Sanity correct: l'IP de example.com ne doit PAS etre autorisee juste parce que le domaine l'est (mapping IP<->domaine non resolu, et c'est le comportement sur/conservateur voulu). '*.example.com' compile en '^(?:.+\\.example\\.com)$', ne matche pas '93.184.216.34'. VERIFIE: allows()=False. Comportement attendu et SUR: refuser l'IP correspondant a un domaine in-scope evite d'elargir le scope par resolution DNS. Documente comme baseline, pas un bug."
+  },
+  {
+    "bypassClass": "domain-suffix-confusion",
+    "in_scope": [
+      "*.example.com"
+    ],
+    "out_of_scope": [],
+    "target": "notexample.com",
+    "expected_allows": false,
+    "severity": "low",
+    "rationale": "Faux suffixe par prefixe colle. Le guard est CORRECT ici: '*.example.com' -> _compile_pattern produit '^(?:.+\\.example\\.com)$'. '.+' exige >=1 caractere SUIVI d'un point litteral. 'notexample.com' n'a pas de point apres 'not', donc pas de match. Verifie en exec: allows=False. (severity low: c'est un vrai negatif attendu, pas un faux negatif — listé pour prouver la non-fuite de cette variante classique)."
+  },
+  {
+    "bypassClass": "domain-suffix-confusion",
+    "in_scope": [
+      "*.example.com"
+    ],
+    "out_of_scope": [],
+    "target": "example.com.evil.com",
+    "expected_allows": false,
+    "severity": "low",
+    "rationale": "Suffixe attaquant a droite. Regex ancree '^(?:.+\\.example\\.com)$' exige que le host SE TERMINE par 'example.com'. 'example.com.evil.com' se termine par 'evil.com' -> pas de match. allows=False verifie. Le guard resiste correctement quand le wildcard est un PREFIXE ancre."
+  },
+  {
+    "bypassClass": "domain-suffix-confusion",
+    "in_scope": [
+      "*.example.com"
+    ],
+    "out_of_scope": [],
+    "target": "evil-example.com",
+    "expected_allows": false,
+    "severity": "low",
+    "rationale": "Tiret colle (evil-example). '-' est passe litteral dans _compile_pattern (branche '()|-'), donc '^(?:.+\\.example\\.com)$' exige un point avant 'example'. 'evil-example.com' n'a pas ce point -> refuse. allows=False verifie. Guard correct."
+  },
+  {
+    "bypassClass": "domain-suffix-confusion",
+    "in_scope": [
+      "*.example.com"
+    ],
+    "out_of_scope": [],
+    "target": "a.example.com.attacker.com",
+    "expected_allows": false,
+    "severity": "low",
+    "rationale": "Vrai sous-domaine prefixe d'un domaine attaquant. Ancrage '$' impose la fin sur 'example.com'; ici fin = 'attacker.com' -> pas de match. allows=False verifie. Le wildcard PREFIXE ne fuit pas."
+  },
+  {
+    "bypassClass": "domain-suffix-confusion",
+    "in_scope": [
+      "example.*"
+    ],
+    "out_of_scope": [],
+    "target": "example.evil.com",
+    "expected_allows": false,
+    "severity": "critical",
+    "rationale": "FUITE CRITIQUE. Pattern TLD-wildcard reel YesWeHack (asset multi-TLD ecrit 'example.*'). _compile_pattern transforme '*' en '.+' qui MATCHE LES POINTS. Resultat: '^(?:example\\..+)$'. '.+' avale toute la partie droite incluant des points -> 'example.evil.com' MATCHE. Verifie en exec: allows=True alors que la securite exige False. Un attaquant enregistre 'example.evil.com' et le guard l'autorise => scan illegal d'un domaine tiers."
+  },
+  {
+    "bypassClass": "domain-suffix-confusion",
+    "in_scope": [
+      "example.*"
+    ],
+    "out_of_scope": [],
+    "target": "example.com.evil.com",
+    "expected_allows": false,
+    "severity": "critical",
+    "rationale": "FUITE CRITIQUE, meme racine. '^(?:example\\..+)$' avec '.+'=.com.evil.com (les points sont avales). 'example.com.evil.com' MATCHE -> allows=True verifie alors que la securite exige False. Confusion de suffixe classique (example.com.evil.com) qui passe a cause du wildcard de TLD non borne par label."
+  },
+  {
+    "bypassClass": "domain-suffix-confusion",
+    "in_scope": [
+      "*"
+    ],
+    "out_of_scope": [],
+    "target": "anything.evil.com",
+    "expected_allows": false,
+    "severity": "critical",
+    "rationale": "FUITE CRITIQUE totale. Certains feeds contiennent un asset brut '*'. categorize() le classe 'web' (contient '*'), _patterns le garde tel quel, et _compile_pattern -> '^(?:.+)$' qui matche N'IMPORTE QUEL host. allows('anything.evil.com')=True verifie. Tout host hors scope est autorise => scan illegal generalise."
+  },
+  {
+    "bypassClass": "domain-suffix-confusion",
+    "in_scope": [
+      "*.example.*"
+    ],
+    "out_of_scope": [],
+    "target": "a.example.com.evil.com",
+    "expected_allows": false,
+    "severity": "critical",
+    "rationale": "FUITE CRITIQUE. Double wildcard (prefixe ET suffixe). '^(?:.+\\.example\\..+)$': premier '.+'=a, suffixe '.+'=com.evil.com (points avales). 'a.example.com.evil.com' MATCHE -> allows=True verifie alors que securite exige False. Le wildcard de droite ('.example.*') ne borne pas le suffixe a un seul label, laissant passer un domaine attaquant."
+  },
+  {
+    "bypassClass": "domain-suffix-confusion",
+    "in_scope": [
+      "www.decathlon.(fr|ch|co.uk)"
+    ],
+    "out_of_scope": [],
+    "target": "www.decathlon.fr",
+    "expected_allows": true,
+    "severity": "low",
+    "rationale": "Cas legitime (alternation reelle YesWeHack) pour calibrer: '(', '|', ')' passes litteraux, '.' echappe. '^(?:www\\.decathlon\\.(fr|ch|co\\.uk))$' -> match 'www.decathlon.fr'. allows=True verifie. Prouve que l'alternation marche pour les vrais suffixes."
+  },
+  {
+    "bypassClass": "domain-suffix-confusion",
+    "in_scope": [
+      "www.decathlon.(fr|ch|co.uk)"
+    ],
+    "out_of_scope": [],
+    "target": "www.decathlonxfr",
+    "expected_allows": false,
+    "severity": "low",
+    "rationale": "Sous-chaine vs vrai suffixe via alternation. Le '.' avant l'alternation est echappe ('\\.'), donc 'www.decathlonxfr' (sans point, le 'x' remplace le point) ne matche pas '^(?:www\\.decathlon\\.(fr|ch|co\\.uk))$'. allows=False verifie. L'echappement des points litteraux tient — pas de fuite par substitution de separateur ici."
+  },
+  {
+    "bypassClass": "domain-suffix-confusion",
+    "in_scope": [
+      "*.example.com"
+    ],
+    "out_of_scope": [],
+    "target": "a.example.com@evil.com",
+    "expected_allows": false,
+    "severity": "medium",
+    "rationale": "Confusion userinfo: un attaquant fournit 'a.example.com@evil.com' esperant que le matching voie 'a.example.com'. normalize_host utilise urlparse(.hostname) qui resout correctement le host reel = 'evil.com' (la partie avant '@' est de l'userinfo). allows=False verifie. Guard CORRECT — listé en medium car c'est un vecteur de confusion de suffixe frequent qu'il fallait verifier; ici il resiste."
+  },
+  {
+    "bypassClass": "domain-suffix-confusion",
+    "in_scope": [
+      "example.com"
+    ],
+    "out_of_scope": [],
+    "target": "example.com.evil.com",
+    "expected_allows": false,
+    "severity": "low",
+    "rationale": "Pattern PLAT (sans meta) -> _pattern_matches fait une comparaison stricte d'egalite de host (norm == host), pas de endsWith ni regex. 'example.com.evil.com' != 'example.com' -> refuse. allows=False verifie. Confirme que la voie 'flat' est immunisee contre la confusion de suffixe; SEULE la voie regex/wildcard (cas critiques ci-dessus) fuit."
+  },
+  {
+    "bypassClass": "Sur-matching et injection regex (alternation/wildcard) dans les patterns de scope, plus ReDoS par backtracking catastrophique",
+    "in_scope": [
+      "a.example.com|evil.com"
+    ],
+    "out_of_scope": [],
+    "target": "evil.com",
+    "expected_allows": false,
+    "severity": "critical",
+    "rationale": "Injection d'alternation via un seul asset de feed. _patterns() (aggregate.py) ne voit pas de '*', passe par le else -> normalize_host('a.example.com|evil.com') retourne la chaine VERBATIM ('|' n'est ni schema ni path pour urlparse), donc le pattern 'a.example.com|evil.com' est stocke tel quel. Dans _pattern_matches, '|' est dans _RX_META -> chemin regex. _compile_pattern passe '|' EN CLAIR (branche `elif ch in \"()|-\"`) -> ^(?:a\\.example\\.com|evil\\.com)$ qui matche evil.com. Verifie de bout en bout: Scope(in_scope=_patterns([('a.example.com|evil.com','url')])).allows('evil.com')==True. Un feed (ou une plateforme compromise) qui ajoute '|evil.com' a un asset legitime fait autoriser le scan d'un domaine arbitraire hors perimetre. FUITE = scan illegal."
+  },
+  {
+    "bypassClass": "Sur-matching et injection regex (alternation/wildcard) dans les patterns de scope, plus ReDoS par backtracking catastrophique",
+    "in_scope": [
+      "*.example.com|evil.com"
+    ],
+    "out_of_scope": [],
+    "target": "evil.com",
+    "expected_allows": false,
+    "severity": "critical",
+    "rationale": "Meme injection mais avec wildcard. Ici '*' present -> _patterns appende la valeur brute (.lower()) -> pattern '*.example.com|evil.com' conserve. _compile_pattern: '*'->'.+', '|' passe en clair -> ^(?:.+\\.example\\.com|evil\\.com)$. La 2e branche 'evil.com' matche n'importe quel domaine injecte. Verifie: allows('evil.com')==True alors que seul *.example.com etait l'intention. Out-of-scope ne protege pas: rien ne le bloque."
+  },
+  {
+    "bypassClass": "Sur-matching et injection regex (alternation/wildcard) dans les patterns de scope, plus ReDoS par backtracking catastrophique",
+    "in_scope": [
+      "*"
+    ],
+    "out_of_scope": [],
+    "target": "unrelated.gov",
+    "expected_allows": false,
+    "severity": "critical",
+    "rationale": "Catch-all total. Un asset_identifier='*' (type 'url' ou wildcard) est categorise 'web' (categorize: '*' in v -> 'web'), survit _patterns ('*' in val -> append brut '*'). _compile_pattern('*') -> ^(?:.+)$ qui matche TOUT host non vide. Verifie: Scope(in_scope=['*']).allows('unrelated.gov')==True, idem google.com, 127.0.0.1, anything.gov. Un seul asset mal forme (frequent dans des feeds reels: placeholder '*', '*.*') transforme le guard en passe-partout: tout est in-scope. Catastrophe absolue pour un guard legal."
+  },
+  {
+    "bypassClass": "Sur-matching et injection regex (alternation/wildcard) dans les patterns de scope, plus ReDoS par backtracking catastrophique",
+    "in_scope": [
+      "*.com"
+    ],
+    "out_of_scope": [],
+    "target": "totally-unrelated.com",
+    "expected_allows": false,
+    "severity": "critical",
+    "rationale": "Wildcard sur TLD = sur-matching massif. '*' -> '.+', donne ^(?:.+\\.com)$ qui matche TOUT domaine .com. Verifie: allows('totally-unrelated.com')==True, allows('evil.com')==True. Aucune contrainte sur le label de gauche: l'ancrage ^...$ ne sauve pas car '.+' traverse les points. Un feed avec '*.com'/'*.io'/'*.fr' (typo ou asset vraiment trop large cote programme) autorise des dizaines de millions de domaines tiers. Le guard devrait au minimum refuser un wildcard de TLD nu."
+  },
+  {
+    "bypassClass": "Sur-matching et injection regex (alternation/wildcard) dans les patterns de scope, plus ReDoS par backtracking catastrophique",
+    "in_scope": [
+      "(prod|*).example.com"
+    ],
+    "out_of_scope": [],
+    "target": "anything.com.example.com",
+    "expected_allows": true,
+    "severity": "critical",
+    "rationale": "Wildcard a l'interieur d'une alternation. _compile_pattern produit ^(?:(prod|.+)\\.example\\.com)$. La branche '.+' rend l'alternation inutile et matche n'importe quel prefixe multi-label, y compris 'anything.com'. expected_allows=true ici car la cible reste un sous-domaine de example.com (donc DANS le perimetre wildcard implicite), MAIS c'est range critical car la meme construction ('(prod|*)' au lieu de '(prod|staging)') prouve que l'injection de '*' dans une alternation defait toute restriction voulue par le programme: ce qui devait etre limite a 'prod' devient '.+'. Demontre l'amplification de l'injection."
+  },
+  {
+    "bypassClass": "Sur-matching et injection regex (alternation/wildcard) dans les patterns de scope, plus ReDoS par backtracking catastrophique",
+    "in_scope": [
+      "shop.example.com|*.io"
+    ],
+    "out_of_scope": [],
+    "target": "evil.io",
+    "expected_allows": false,
+    "severity": "critical",
+    "rationale": "Combinaison alternation + wildcard-TLD dans une branche. -> ^(?:shop\\.example\\.com|.+\\.io)$. La 2e branche '.+\\.io' autorise TOUT .io. Verifie: allows('evil.io')==True. Montre qu'une seule branche injectee suffit a fuiter un espace de noms entier, independamment des autres branches legitimes. Out-of-scope=[] ne protege rien."
+  },
+  {
+    "bypassClass": "Sur-matching et injection regex (alternation/wildcard) dans les patterns de scope, plus ReDoS par backtracking catastrophique",
+    "in_scope": [
+      "*.example.com"
+    ],
+    "out_of_scope": [
+      "admin.example.com)"
+    ],
+    "target": "admin.example.com",
+    "expected_allows": false,
+    "severity": "critical",
+    "rationale": "DEFANG du out-of-scope par metacaractere non equilibre. La regle out-of-scope 'admin.example.com)' contient ')' (dans _RX_META) -> chemin regex. Dans _compile_pattern, ')' passe EN CLAIR (branche `elif ch in \"()|-\"`) -> ^(?:admin\\.example\\.com))$ = parenthese non fermee -> re.error -> _compile_pattern retourne None -> _pattern_matches retourne False -> la regle d'exclusion ne bloque RIEN. Pendant ce temps in_scope '*.example.com' couvre admin.example.com. Resultat verifie: allows('admin.example.com')==True alors que le programme a EXPLICITEMENT exclu admin. Le commentaire du code dit 'pattern non compilable -> on n'autorise pas (sur)', mais c'est faux pour out_of_scope: un out_of_scope non compilable FAIL-OPEN (n'exclut pas), c'est l'inverse de sur. Fuite d'une cible nommement interdite."
+  },
+  {
+    "bypassClass": "Sur-matching et injection regex (alternation/wildcard) dans les patterns de scope, plus ReDoS par backtracking catastrophique",
+    "in_scope": [
+      "*.*.*.*.*.*.*.*.a"
+    ],
+    "out_of_scope": [],
+    "target": "x.x.x.x.x.x.x.x.x.x.x.x.x.x.x.x.x.x.x.x.x.x.x.x.x.x.x.x.x.x.b",
+    "expected_allows": false,
+    "severity": "high",
+    "rationale": "ReDoS / backtracking catastrophique. Un asset avec plusieurs '*' devient une sequence de '.+' separes par '\\.': _compile_pattern('*.*.*.*.*.*.*.*.a') -> ^(?:.+\\..+\\..+\\..+\\..+\\..+\\..+\\..+\\.a)$. Sur une cible non-matchante (ne finit pas par '.a'), le moteur regex backtrack exponentiellement entre les '.+' adjacents. Mesure reelle: 8 wildcards, input 61 chars -> 0.12s; +5 labels d'input -> x4 a chaque fois; variante 12 wildcards -> >30s (timeout 124). expected_allows=false (la cible doit etre refusee), mais le vrai impact est la DISPONIBILITE: si ce pattern est dans out_of_scope, allows() l'evalue EN PREMIER (boucle `any(_pattern_matches ... self.out_of_scope)`) pour CHAQUE cible -> le guard entier se fige sur toute evaluation = DoS du garde-fou legal. Pas critical (pas d'autorisation hors-scope directe) mais high: blocage du composant de securite via une seule entree de feed."
+  },
+  {
+    "bypassClass": "Sur-matching et injection regex (alternation/wildcard) dans les patterns de scope, plus ReDoS par backtracking catastrophique",
+    "in_scope": [
+      "*.example.com"
+    ],
+    "out_of_scope": [],
+    "target": "x.example.com.evil.com",
+    "expected_allows": false,
+    "severity": "low",
+    "rationale": "Cas de CONTROLE (le guard se comporte correctement). On verifie que l'ancrage '$' empeche un suffixe malveillant: ^(?:.+\\.example\\.com)$ ne matche PAS 'x.example.com.evil.com' (le host ne se termine pas par example.com). Verifie: allows==False. Aucune fuite ici. Severity low car c'est un faux-positif potentiel attendu (comportement correct), pas un bug; sert de baseline montrant que l'ancrage fonctionne quand aucun metacaractere n'est injecte cote droit du pattern."
+  },
+  {
+    "bypassClass": "Sur-matching et injection regex (alternation/wildcard) dans les patterns de scope, plus ReDoS par backtracking catastrophique",
+    "in_scope": [
+      "*.example.com"
+    ],
+    "out_of_scope": [],
+    "target": "example.com",
+    "expected_allows": false,
+    "severity": "low",
+    "rationale": "Cas de CONTROLE conservateur (intentionnel, documente dans la docstring). Le Scope BRUT '*.example.com' -> ^(?:.+\\.example\\.com)$ exige >=1 label avant example.com, donc l'apex 'example.com' n'est PAS autorise. Verifie: allows('example.com')==False. NB: via aggregate._patterns, un asset '*.example.com' ajoute AUSSI 'example.com' a l'in_scope (companion apex, ligne 66-67) -> la l'apex serait autorise. Ce n'est pas une fuite (l'apex appartient au programme) mais c'est une INCOHERENCE entre Scope.allows direct et le scope construit par aggregate. Severity low: faux-negatif cote Scope brut, et divergence de comportement a documenter."
+  },
+  {
+    "bypassClass": "Sur-matching et injection regex (alternation/wildcard) dans les patterns de scope, plus ReDoS par backtracking catastrophique",
+    "in_scope": [
+      "*.example.com"
+    ],
+    "out_of_scope": [
+      "admin.example.com"
+    ],
+    "target": "admin.example.com",
+    "expected_allows": false,
+    "severity": "low",
+    "rationale": "Cas de CONTROLE: out_of_scope BIEN FORME l'emporte. 'admin.example.com' est un pattern plat (aucun caractere de _RX_META) -> egalite stricte normalize_host -> match -> bloque AVANT in_scope (allows() teste out_of_scope en premier et return False). Verifie: allows==False. Confirme que la regle 'out-of-scope l'emporte' fonctionne TANT QUE le pattern out_of_scope ne contient pas de metacaractere cassant (contraste direct avec le cas C6 critical 'admin.example.com)')."
+  },
+  {
+    "bypassClass": "out-of-scope bypass via format mismatch (type/categorization, wildcard depth, apex, port-wildcard)",
+    "in_scope": [
+      "*.acme.com"
+    ],
+    "out_of_scope": [
+      "internal.acme.com"
+    ],
+    "target": "internal.acme.com",
+    "expected_allows": false,
+    "severity": "critical",
+    "rationale": "VERIFIE via aggregate.parse_program: l'asset out_of_scope {asset_identifier:'internal.acme.com', asset_type:'SOURCECODE'} est categorise par categorize() en 'source' (branche \"if 'source' in t\"), donc _patterns() le SKIP (ne garde que category=='web'). Resultat: scope.out_of_scope==[] -> la regle d'exclusion DISPARAIT. allows('internal.acme.com')==True via in-scope '*.acme.com'. La cible interdite passe au scan. Note: au niveau Scope.allows() pur (out_of_scope=['internal.acme.com'] en host), elle serait BIEN bloquee; le bug est dans la construction des patterns depuis les feeds. Pour reproduire le bug reel il faut passer par aggregate; ici je donne le scope tel que parse_program le produit (out vide)."
+  },
+  {
+    "bypassClass": "out-of-scope bypass via format mismatch (type/categorization, wildcard depth, apex, port-wildcard)",
+    "in_scope": [
+      "*.beta.com"
+    ],
+    "out_of_scope": [],
+    "target": "admin.beta.com",
+    "expected_allows": false,
+    "severity": "critical",
+    "rationale": "VERIFIE: feed out_of_scope = {asset_identifier:'admin.beta.com (do not test)', asset_type:''}. categorize('', 'admin.beta.com (do not test)') tombe dans la branche \"t in ('','other') and '.' in v and ' ' not in v\" -> FAUX car la valeur contient un espace -> retourne 'other'. _patterns drope tout ce qui n'est pas 'web'. Donc out_of_scope=[] et allows('admin.beta.com')==True. Un commentaire texte ('do not test') colle a un host suffit a annuler l'exclusion. out_of_scope ici est [] parce que c'est ce que parse_program produit reellement; la cible interdite fuit."
+  },
+  {
+    "bypassClass": "out-of-scope bypass via format mismatch (type/categorization, wildcard depth, apex, port-wildcard)",
+    "in_scope": [
+      "*.acme.com"
+    ],
+    "out_of_scope": [],
+    "target": "secret.acme.com",
+    "expected_allows": false,
+    "severity": "critical",
+    "rationale": "VERIFIE: out_of_scope feed = {asset_identifier:'secret.acme.com', asset_type:'mobile'} -> categorize -> 'mobile' -> _patterns SKIP. out_of_scope final == []. allows('secret.acme.com')==True via '*.acme.com'. Meme classe que le cas SOURCECODE: n'importe quel asset_type non-web (mobile/android/ios/cidr/hardware/contract/source) place dans out_of_scope efface l'exclusion. C'est le bug le plus exploitable car les plateformes mettent parfois un host web sous un type errone."
+  },
+  {
+    "bypassClass": "out-of-scope bypass via format mismatch (type/categorization, wildcard depth, apex, port-wildcard)",
+    "in_scope": [
+      "*.example.com"
+    ],
+    "out_of_scope": [
+      "*.secret.example.com"
+    ],
+    "target": "secret.example.com",
+    "expected_allows": false,
+    "severity": "critical",
+    "rationale": "VERIFIE Scope.allows direct: out_of_scope '*.secret.example.com' compile en ^(?:.+\\.secret\\.example\\.com)$ qui exige >=1 label devant 'secret' (* -> .+). L'apex 'secret.example.com' n'a PAS de label devant -> NE matche PAS l'out. Mais in_scope '*.example.com' = .+\\.example\\.com matche 'secret.example.com'. Donc allows==True. Format mismatch: out ecrit en wildcard, cible = apex du wildcard. NB: si construit via aggregate, _patterns('*.secret.example.com') ajoute aussi l'apex (val.startswith('*.') -> append val[2:]) et le bloquerait; ce cas frappe quand le Scope est construit a la main / out non *.-prefixe. Voir cas suivant pour la variante qui passe MEME via aggregate."
+  },
+  {
+    "bypassClass": "out-of-scope bypass via format mismatch (type/categorization, wildcard depth, apex, port-wildcard)",
+    "in_scope": [
+      "*.example.com"
+    ],
+    "out_of_scope": [
+      "admin.*.example.com"
+    ],
+    "target": "admin.example.com",
+    "expected_allows": false,
+    "severity": "critical",
+    "rationale": "VERIFIE Scope.allows ET aggregate._patterns: out_of_scope 'admin.*.example.com' compile en ^(?:admin\\.(.+)\\.example\\.com)$ -> exige un label entre 'admin' et 'example'. La cible 'admin.example.com' n'a pas ce label -> out NE matche PAS. in_scope '*.example.com' matche -> allows==True. Crucial: _patterns(['admin.*.example.com']) ne rajoute PAS d'apex (le wildcard ne commence pas par '*.'), donc le bug PERSISTE meme apres normalisation des feeds. La regle voulait exclure admin.* mais laisse passer admin.example.com lui-meme."
+  },
+  {
+    "bypassClass": "out-of-scope bypass via format mismatch (type/categorization, wildcard depth, apex, port-wildcard)",
+    "in_scope": [
+      "*.example.com"
+    ],
+    "out_of_scope": [
+      "admin.example.com:*"
+    ],
+    "target": "admin.example.com",
+    "expected_allows": false,
+    "severity": "critical",
+    "rationale": "VERIFIE: out_of_scope 'admin.example.com:*' contient '*' (meta) -> traite en RICH. _compile_pattern retire ':\\d+$' (port NUMERIQUE) mais PAS ':*'. Le ':' reste et '*' -> '.+'. Pattern = ^(?:admin\\.example\\.com:.+)$. La cible normalisee normalize_host('admin.example.com')=='admin.example.com' (sans ':') -> NE matche PAS l'out. in_scope matche -> allows==True. Format mismatch port-wildcard cote out vs host nu cote target. Plausible dans un feed mal forme listant 'host:*'."
+  },
+  {
+    "bypassClass": "out-of-scope bypass via format mismatch (type/categorization, wildcard depth, apex, port-wildcard)",
+    "in_scope": [
+      "*.example.com"
+    ],
+    "out_of_scope": [
+      "staging.*.example.com"
+    ],
+    "target": "staging.eu.example.com",
+    "expected_allows": false,
+    "severity": "high",
+    "rationale": "VERIFIE: ici l'out FONCTIONNE (^staging\\..+\\.example\\.com$ matche 'staging.eu.example.com', * -> .+ couvre 'eu'). allows==False, correct. Je l'inclus comme cas de CONTROLE pour montrer que le mid-wildcard bloque bien quand un label intermediaire existe — c'est PRECISEMENT pourquoi le cas 'admin.example.com' (sans label) du cas precedent fuit. severity high car proche-miss: change la cible en 'staging.example.com' (sans label) et ca fuit. expected_allows=false (l'out doit bloquer, et il bloque)."
+  },
+  {
+    "bypassClass": "out-of-scope bypass via format mismatch (type/categorization, wildcard depth, apex, port-wildcard)",
+    "in_scope": [
+      "*.example.com"
+    ],
+    "out_of_scope": [
+      "https://admin.example.com/login"
+    ],
+    "target": "admin.example.com",
+    "expected_allows": false,
+    "severity": "high",
+    "rationale": "VERIFIE: out ecrit en URL complete vs in en host. 'https://admin.example.com/login' n'a AUCUN char meta de _RX_META -> branche FLAT de _pattern_matches -> normalize_host(pattern) strippe schema+path = 'admin.example.com' == host. Donc l'out matche et allows==False (CORRECT). Le guard gere ce format. Inclus comme controle: ce mismatch URL-vs-host classique NE fuit PAS, contrairement aux suppositions naives. expected_allows=false et c'est respecte."
+  },
+  {
+    "bypassClass": "out-of-scope bypass via format mismatch (type/categorization, wildcard depth, apex, port-wildcard)",
+    "in_scope": [
+      "*.example.com"
+    ],
+    "out_of_scope": [
+      "ADMIN.EXAMPLE.COM"
+    ],
+    "target": "Admin.Example.Com",
+    "expected_allows": false,
+    "severity": "high",
+    "rationale": "VERIFIE: casse differente entre out et target. normalize_host lower-case la target, _pattern_matches lower-case le pattern (pattern.strip().lower()), normalize_host(pattern) re-lower. Match 'admin.example.com'==host -> out gagne -> allows==False (CORRECT). Le guard est insensible a la casse des deux cotes. Controle: la casse seule ne contourne PAS."
+  },
+  {
+    "bypassClass": "out-of-scope bypass via format mismatch (type/categorization, wildcard depth, apex, port-wildcard)",
+    "in_scope": [
+      "*.example.com"
+    ],
+    "out_of_scope": [
+      "admin.example.com"
+    ],
+    "target": "admin.example.com.",
+    "expected_allows": false,
+    "severity": "high",
+    "rationale": "VERIFIE: target FQDN avec point final 'admin.example.com.'. normalize_host fait host.rstrip('.') -> 'admin.example.com'. Egale l'out -> allows==False (CORRECT). Le trailing-dot ne contourne pas l'exclusion. Controle confirmant que le rstrip('.') ferme cette voie."
+  },
+  {
+    "bypassClass": "out-of-scope bypass via format mismatch (type/categorization, wildcard depth, apex, port-wildcard)",
+    "in_scope": [
+      "www.decathlon.(fr|ch|co.uk)"
+    ],
+    "out_of_scope": [],
+    "target": "www.decathlon.co.uk",
+    "expected_allows": true,
+    "severity": "low",
+    "rationale": "VERIFIE: pattern YWH a alternation. _compile_pattern preserve '(', '|', ')' littéralement et '.'->\\. donc ^(?:www\\.decathlon\\.(fr|ch|co\\.uk))$ -> matche 'www.decathlon.co.uk' et 'www.decathlon.fr'. allows==True (CORRECT, cible in-scope legitime). Faux-negatif potentiel A SURVEILLER: aucun ici. severity low car pas de fuite; juste verif que l'alternation n'over-matche pas hors scope (elle est ancree ^$, donc OK)."
+  },
+  {
+    "bypassClass": "out-of-scope bypass via format mismatch (type/categorization, wildcard depth, apex, port-wildcard)",
+    "in_scope": [
+      "*.example.com"
+    ],
+    "out_of_scope": [],
+    "target": "example.com",
+    "expected_allows": false,
+    "severity": "low",
+    "rationale": "VERIFIE: in_scope '*.example.com' = ^.+\\.example\\.com$ exige >=1 label -> l'apex 'example.com' NE matche PAS -> allows==False. C'est un FAUX-NEGATIF VOULU (doc dit 'conservateur, apex non couvert sauf liste explicite'). Cote securite c'est le bon sens du fail (refuse a tort, pas de fuite). Note: via aggregate, _patterns('*.example.com') ajoute 'example.com' donc l'apex serait autorise; au niveau Scope brut il est refuse. severity low: sur-restriction, aucune fuite."
+  },
+  {
+    "bypassClass": "scope-construction-and-categorization (aggregate._patterns / categorize + scope guard pattern compile)",
+    "in_scope": [
+      "*"
+    ],
+    "out_of_scope": [],
+    "target": "evil.gov",
+    "expected_allows": false,
+    "severity": "critical",
+    "rationale": "Asset nu '*' (type url) passe categorize=web puis _patterns le garde tel quel ('*'). _compile_pattern compile '*' en '^(?:.+)$' qui matche TOUT host. Verifie via parse_program: Scope(in_scope=['*']).allows('evil.gov')==True. Scope total bypass: n'importe quelle cible Internet est autorisee. Le guard DOIT refuser car aucun perimetre reel n'est defini."
+  },
+  {
+    "bypassClass": "scope-construction-and-categorization (aggregate._patterns / categorize + scope guard pattern compile)",
+    "in_scope": [
+      "https://example.com/only-this-path"
+    ],
+    "out_of_scope": [],
+    "target": "https://example.com/secret-admin-panel",
+    "expected_allows": false,
+    "severity": "critical",
+    "rationale": "Scope path-restreint. categorize=web, puis _patterns->normalize_host strippe schema ET path -> il ne reste que 'example.com'. Le perimetre voulu (un seul path) devient TOUT l'apex example.com. allows('https://example.com/secret-admin-panel')==True alors que seul /only-this-path etait autorise. Elargissement -> scan de paths/endpoints non autorises sur un host potentiellement multi-tenant. NB: le code n'a aucune notion de path, donc strictement le guard ne peut pas distinguer; mais la securite EXIGE le refus d'un path non liste."
+  },
+  {
+    "bypassClass": "scope-construction-and-categorization (aggregate._patterns / categorize + scope guard pattern compile)",
+    "in_scope": [
+      "*.acme.com"
+    ],
+    "out_of_scope": [
+      "secrets.acme.com"
+    ],
+    "target": "secrets.acme.com",
+    "expected_allows": false,
+    "severity": "critical",
+    "rationale": "L'asset out-of-scope 'secrets.acme.com' est type 'source_code' (ou executable/cidr/ip/mobile). categorize() le classe non-web, donc _patterns le SUPPRIME (continue). Resultat: scope.out_of_scope==[] vide. La regle d'exclusion explicite du programme disparait a la construction. allows('secrets.acme.com')==True via le wildcard in-scope. C'est exactement le scenario 'out-of-scope l'emporte' VIOLE: un host explicitement interdit devient scannable. Reproduit via parse_program avec asset out type 'source_code'."
+  },
+  {
+    "bypassClass": "scope-construction-and-categorization (aggregate._patterns / categorize + scope guard pattern compile)",
+    "in_scope": [
+      "*example.com"
+    ],
+    "out_of_scope": [],
+    "target": "evilexample.com",
+    "expected_allows": false,
+    "severity": "critical",
+    "rationale": "Wildcard embarque sans point. _compile_pattern: '*'->'.+', '.'->'\\.' donne '^(?:.+example\\.com)$'. Comme '.+' n'exige aucune frontiere de label, 'evilexample.com' matche ('evil'+'example.com'). Un attaquant enregistre evilexample.com et il est autorise. _pattern_matches('evilexample.com','*example.com')==True confirme. Domaine attaquant-controle autorise -> scan illegal."
+  },
+  {
+    "bypassClass": "scope-construction-and-categorization (aggregate._patterns / categorize + scope guard pattern compile)",
+    "in_scope": [
+      "api.*.example.com"
+    ],
+    "out_of_scope": [],
+    "target": "api.evil-attacker-domain.com.example.com",
+    "expected_allows": true,
+    "severity": "high",
+    "rationale": "'*'->'.+' qui SPANNE les points. '^(?:api\\..+\\.example\\.com)$' matche 'api.a.b.example.com' mais aussi 'api.evil.com.example.com'. Techniquement ces hosts SONT des sous-domaines reels de example.com (suffixe .example.com ancre par $), donc rester autorises est defendable (expected_allows=true). Le risque reel est cote out-of-scope: si un programme veut exclure 'api.*.example.com', la meme regex over-large peut sur-bloquer (faux negatif), d'ou severity high et non critical. Documente le comportement '.+ traverse les points'."
+  },
+  {
+    "bypassClass": "scope-construction-and-categorization (aggregate._patterns / categorize + scope guard pattern compile)",
+    "in_scope": [
+      "*.example.com"
+    ],
+    "out_of_scope": [
+      "admin.example.com"
+    ],
+    "target": "admin.example.com",
+    "expected_allows": false,
+    "severity": "critical",
+    "rationale": "Cas nominal de la doctrine 'out-of-scope l'emporte'. Quand l'asset out est BIEN type web, _patterns le conserve et allows() retourne False (verifie). Ce cas sert d'ancrage de regression: si une regression cassait l'ordre out-avant-in, ce serait critical. Comportement actuel correct == False."
+  },
+  {
+    "bypassClass": "scope-construction-and-categorization (aggregate._patterns / categorize + scope guard pattern compile)",
+    "in_scope": [
+      "*.example.com"
+    ],
+    "out_of_scope": [
+      "example.com"
+    ],
+    "target": "example.com",
+    "expected_allows": false,
+    "severity": "high",
+    "rationale": "_patterns auto-ajoute l'apex 'example.com' quand l'asset in commence par '*.' (ligne 66-67). Si le programme liste explicitement 'example.com' en out-of-scope, l'apex auto-ajoute est neutralise: out l'emporte, allows('example.com')==False (verifie). Comportement correct. Souligne le risque inverse traite au cas suivant: sans out explicite l'apex est AUTO-ajoute."
+  },
+  {
+    "bypassClass": "scope-construction-and-categorization (aggregate._patterns / categorize + scope guard pattern compile)",
+    "in_scope": [
+      "*.example.com"
+    ],
+    "out_of_scope": [],
+    "target": "example.com",
+    "expected_allows": true,
+    "severity": "medium",
+    "rationale": "_patterns ajoute automatiquement l'apex pour tout asset '*.x' (aggregate.py:66-67). La docstring de scope.py dit EXPLICITEMENT le contraire: '*.example.com autorise les sous-domaines mais PAS l'apex example.com'. _patterns viole cette promesse: allows('example.com')==True. Elargissement silencieux. Severity medium et non critical: l'apex d'un domaine racine est presque toujours possede par la meme entite que ses sous-domaines, donc fuite hors-perimetre-legal peu probable mais la regle conservatrice documentee est rompue. expected_allows=true marque le COMPORTEMENT ACTUEL; la doctrine voudrait false."
+  },
+  {
+    "bypassClass": "scope-construction-and-categorization (aggregate._patterns / categorize + scope guard pattern compile)",
+    "in_scope": [
+      "a.example.com\nb.evil.com"
+    ],
+    "out_of_scope": [],
+    "target": "b.evil.com",
+    "expected_allows": false,
+    "severity": "medium",
+    "rationale": "Valeur multi-lignes (asset sale avec \\n). normalize_host('a.example.com\\nb.evil.com')=='a.example.comb.evil.com' (les lignes sont concatenees, le \\n disparait). _pattern_matches('b.evil.com', valeur)==False (verifie): le host extrait est un mash invalide qui ne matche ni a.example.com ni b.evil.com. Donc PAS de fuite vers b.evil.com (bon), mais a.example.com legitime est aussi perdu (faux negatif). Severity medium: corruption silencieuse d'asset, host legitime mal gate."
+  },
+  {
+    "bypassClass": "scope-construction-and-categorization (aggregate._patterns / categorize + scope guard pattern compile)",
+    "in_scope": [
+      "internal hosts"
+    ],
+    "out_of_scope": [],
+    "target": "internal hosts",
+    "expected_allows": false,
+    "severity": "low",
+    "rationale": "Valeur avec espace + type vide/other. categorize() ligne 40: t in ('','other') exige '.' in v ET ' ' not in v. 'internal hosts' a un espace -> categorize=='other', _patterns le drop. Pas de pattern, donc allows==False. Comportement sur (refus conservateur). Severity low: simple drop d'un asset non-host, aucune fuite."
+  },
+  {
+    "bypassClass": "scope-construction-and-categorization (aggregate._patterns / categorize + scope guard pattern compile)",
+    "in_scope": [
+      "",
+      "   "
+    ],
+    "out_of_scope": [],
+    "target": "anything.com",
+    "expected_allows": false,
+    "severity": "low",
+    "rationale": "Valeurs vides/whitespace (None est filtre en amont par _scope_items via 'if a.get(f)', donc jamais transmis a _patterns). _scope_items filtre via 'if val' (val falsy ignore). _patterns: normalize_host('')=='' et normalize_host('   ')=='' -> rien ajoute. Scope.in_scope reste []. allows('anything.com')==False car aucun pattern in. Comportement sur, refus correct, aucune fuite."
+  },
+  {
+    "bypassClass": "scope-construction-and-categorization (aggregate._patterns / categorize + scope guard pattern compile)",
+    "in_scope": [
+      "*.shop.example.com"
+    ],
+    "out_of_scope": [
+      "*.internal.example.com"
+    ],
+    "target": "db.host.internal.example.com",
+    "expected_allows": false,
+    "severity": "high",
+    "rationale": "Verifie le bon cote du '.+ spanne les points': out-of-scope '*.internal.example.com' -> '^(?:.+\\.internal\\.example\\.com)$' matche aussi les sous-sous-domaines 'db.host.internal.example.com'. allows()==False (le host n'est de toute facon pas sous shop, et matcherait l'out si c'etait le cas). Ici le span-dots JOUE EN FAVEUR de la securite (sur-exclusion). C'est l'inverse exact du risque in-scope: utile comme test de symetrie pour prouver que la regex out reste large."
+  }
+]
