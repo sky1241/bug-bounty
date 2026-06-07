@@ -350,6 +350,57 @@ def _get(url, timeout=10):
     return requests.get(url, timeout=timeout, allow_redirects=False, headers={"User-Agent": _UA})
 
 
+def katana_crawl(hosts, scope: Scope, *, depth: int = 2, timeout: int = 300):
+    """Crawl (katana) des hosts in-scope → URLs/endpoints (Phase 2 mapping). Actif léger.
+
+    Re-filtre chaque URL par scope (katana peut suivre des liens externes).
+    """
+    kat = _bin("katana")
+    hosts = [h for h in hosts if scope.allows(h)]
+    if not kat or not hosts:
+        return []
+    payload = "\n".join(f"https://{h}" for h in hosts)
+    try:
+        out = subprocess.run([kat, "-silent", "-d", str(depth), "-jc", "-no-color"],
+                             input=payload, capture_output=True, text=True, timeout=timeout)
+    except (subprocess.SubprocessError, OSError):
+        return []
+    found = []
+    for line in out.stdout.splitlines():
+        u = line.strip()
+        h = normalize_host(u)
+        if h and scope.allows(h):  # défense en profondeur
+            found.append(u)
+    return sorted(set(found))
+
+
+def naabu_ports(hosts, scope: Scope, *, top_ports: str = "100", timeout: int = 300):
+    """Scan de ports (naabu) sur les hosts in-scope. ACTIF/intrusif → opt-in (--ports).
+
+    Retourne {host: [ports]}. Rate-limité (anti-ban). In-scope only.
+    """
+    nb = pd_path("naabu") or _bin("naabu")
+    hosts = [h for h in hosts if scope.allows(h)]
+    if not nb or not hosts:
+        return {}
+    try:
+        out = subprocess.run([nb, "-silent", "-json", "-top-ports", top_ports, "-rate", "100"],
+                             input="\n".join(hosts), capture_output=True, text=True, timeout=timeout)
+    except (subprocess.SubprocessError, OSError):
+        return {}
+    ports = {}
+    for line in out.stdout.splitlines():
+        try:
+            d = json.loads(line)
+        except ValueError:
+            continue
+        h = (d.get("host") or "").lower()
+        p = d.get("port")
+        if h and p and scope.allows(h):
+            ports.setdefault(h, []).append(p)
+    return ports
+
+
 def basic_checks(result: HostResult, scope: Scope, *, get=_get) -> list:
     """Checks non destructifs sur un host VIVANT et in-scope (headers, fichiers exposés)."""
     if not result.alive or not scope.allows(result.host):
@@ -385,7 +436,7 @@ def basic_checks(result: HostResult, scope: Scope, *, get=_get) -> list:
 
 # ── Orchestration ───────────────────────────────────────────────────────────
 def run(domain: str, scope: Scope, *, passive_only: bool = False, do_checks: bool = True,
-        do_scan: bool = False, prober=None, use_tools: bool = True,
+        do_scan: bool = False, do_ports: bool = False, prober=None, use_tools: bool = True,
         collect_urls: bool = True) -> dict:
     """Recon → probe → (checks/scan). Tout est filtré par le scope à chaque étape.
 
@@ -431,6 +482,17 @@ def run(domain: str, scope: Scope, *, passive_only: bool = False, do_checks: boo
     if do_scan and pd_tool("nuclei"):
         _scan_nuclei(results, scope)
 
+    alive_hosts = [r.host for r in results if r.alive]
+    # Phase 2 (mapping) : crawl katana des hosts vivants → URLs/endpoints supplémentaires
+    if prober is None and collect_urls and use_tools and _bin("katana") and alive_hosts:
+        crawled = katana_crawl(alive_hosts, scope)
+        if crawled:
+            merged = sorted(set(report.get("url_list", [])) | set(crawled))
+            report["url_list"], report["urls"] = merged[:1000], len(merged)
+    # Ports (naabu) — opt-in car actif/intrusif
+    if do_ports and prober is None and alive_hosts:
+        report["ports"] = naabu_ports(alive_hosts, scope)
+
     report["hosts"] = [asdict(r) for r in results]
-    report["alive"] = sum(1 for r in results if r.alive)
+    report["alive"] = len(alive_hosts)
     return report
