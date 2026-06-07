@@ -30,6 +30,38 @@ def test_probe_never_touches_out_of_scope():
     assert "evil.com" in rej and "x.attacker.io" in rej
 
 
+def test_basic_checks_env_detection_robust():
+    """Un vrai .env (REDIS_HOST/JWT_SECRET...) doit être détecté (fix faux négatif)."""
+    from bb.recon import HostResult, basic_checks
+
+    class Resp:
+        def __init__(self, code, text):
+            self.status_code, self.text, self.headers = code, text, {}
+
+    def fake_get(url, timeout=10):
+        return Resp(200, "REDIS_HOST=localhost\nJWT_SECRET=abc123") if url.endswith("/.env") else Resp(404, "")
+
+    res = HostResult(host="app.example.com", alive=True, scheme="https")
+    findings = basic_checks(res, Scope(in_scope=["*.example.com"]), get=fake_get)
+    assert any(f.get("detail") == "/.env" for f in findings), "vrai .env non détecté"
+
+
+def test_basic_checks_env_no_false_positive():
+    """Une page HTML 200 sans variables d'env ne doit PAS être flaggée comme .env."""
+    from bb.recon import HostResult, basic_checks
+
+    class Resp:
+        def __init__(self, code, text):
+            self.status_code, self.text, self.headers = code, text, {}
+
+    def fake_get(url, timeout=10):
+        return Resp(200, "<html><body>Page not found custom</body></html>")
+
+    res = HostResult(host="app.example.com", alive=True, scheme="https")
+    findings = basic_checks(res, Scope(in_scope=["*.example.com"]), get=fake_get)
+    assert not any(f.get("type") == "exposed-file" for f in findings)   # zéro faux positif
+
+
 def test_passive_urls_filtered_by_scope():
     from bb.recon import passive_urls
     rows = [["original"],                                   # en-tête CDX

@@ -36,9 +36,11 @@ def create(name: str, scope: Scope, *, base: Path = ENGAGEMENTS) -> Path:
     d = base / slugify(name)
     (d / "recon").mkdir(parents=True, exist_ok=True)
     (d / "findings").mkdir(parents=True, exist_ok=True)
-    (d / "scope.json").write_text(
-        json.dumps({"name": name, "in_scope": scope.in_scope,
-                    "out_of_scope": scope.out_of_scope}, indent=2, ensure_ascii=False))
+    scope_file = d / "scope.json"
+    if not scope_file.exists():  # idempotent : ne pas écraser un scope déjà figé/édité
+        scope_file.write_text(
+            json.dumps({"name": name, "in_scope": scope.in_scope,
+                        "out_of_scope": scope.out_of_scope}, indent=2, ensure_ascii=False))
     readme = d / "README.md"
     if not readme.exists():
         readme.write_text(

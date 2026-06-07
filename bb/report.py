@@ -6,6 +6,7 @@ LÈVE `ReportNotValidated` sinon. On vérifie aussi que la cible est in-scope.
 """
 from __future__ import annotations
 
+import re
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
 
@@ -121,10 +122,11 @@ def render(finding: Finding, validation: Validation, scope: Scope | None = None,
         "V_CROSS": "x" if validation.cross else " ",
         "V_SCOPE": "x" if validation.legal else " ",
     }
-    out = _TEMPLATE.read_text()
-    for key, val in mapping.items():
-        out = out.replace("{{" + key + "}}", str(val))
-    return out
+    # Remplacement en UNE passe : une valeur de champ qui contiendrait '{{...}}'
+    # (ex. un payload) n'est pas ré-interprétée comme placeholder (anti-injection).
+    rendered = {k: str(v) for k, v in mapping.items()}
+    return re.sub(r"\{\{(\w+)\}\}", lambda m: rendered.get(m.group(1), m.group(0)),
+                  _TEMPLATE.read_text())
 
 
 def finding_from_dict(d: dict) -> Finding:

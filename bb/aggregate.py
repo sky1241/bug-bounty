@@ -118,7 +118,9 @@ def parse_program(platform: str, raw: dict) -> Program | None:
     url = raw.get("url") or ""
     handle = str(raw.get("handle") or raw.get("id") or raw.get("company_handle") or "")
 
-    targets = raw.get("targets") or {}
+    targets = raw.get("targets")
+    if not isinstance(targets, dict):  # données de feed malformées (liste, null, str)
+        targets = {}
     in_items = _scope_items(targets.get("in_scope"))
     out_items = _scope_items(targets.get("out_of_scope"))
     scope = Scope(in_scope=_in_patterns(in_items), out_of_scope=_out_patterns(out_items))

@@ -40,13 +40,24 @@ def _fetch_ywh_all() -> list:
 
 def update(data_dir: Path = DATA_DIR) -> None:
     data_dir.mkdir(parents=True, exist_ok=True)
+    errors = []
     for plat, url in FEEDS.items():
-        data = _fetch(url)
-        (data_dir / f"{plat}.json").write_text(json.dumps(data))
-        print(f"  {plat}: {len(data)} programmes")
-    items = _fetch_ywh_all()
-    (data_dir / "yeswehack_api.json").write_text(json.dumps(items))
-    print(f"  yeswehack_api: {len(items)} items (country/bounty FR)")
+        try:  # une source qui tombe ne doit PAS faire échouer tout l'update
+            data = _fetch(url)
+            (data_dir / f"{plat}.json").write_text(json.dumps(data))
+            print(f"  {plat}: {len(data)} programmes")
+        except Exception as e:  # noqa: BLE001
+            errors.append(f"{plat}: {type(e).__name__}")
+            print(f"  {plat}: ÉCHEC ({type(e).__name__}) — cache précédent conservé")
+    try:
+        items = _fetch_ywh_all()
+        (data_dir / "yeswehack_api.json").write_text(json.dumps(items))
+        print(f"  yeswehack_api: {len(items)} items (country/bounty FR)")
+    except Exception as e:  # noqa: BLE001
+        errors.append(f"yeswehack_api: {type(e).__name__}")
+        print(f"  yeswehack_api: ÉCHEC ({type(e).__name__})")
+    if errors:
+        print(f"⚠️  {len(errors)} source(s) en échec: {', '.join(errors)} (les autres sont à jour)")
 
 
 def load(data_dir: Path = DATA_DIR):

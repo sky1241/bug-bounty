@@ -10,12 +10,23 @@ if [ $# -gt 0 ]; then NODES=("$@"); else NODES=(pc1 pc3); fi
 for node in "${NODES[@]}"; do
   echo "========== $node =========="
   echo "[$node] sync code…"
-  rsync -az \
-    --exclude '.git' --exclude '.muninn' --exclude 'data/programs/*.json' \
-    --exclude 'journal/*.jsonl' --exclude '__pycache__' --exclude '.venv' --exclude '*.pyc' \
-    "$SRC" "$node:bug-bounty/" 2>&1 | tail -2 \
-    || { echo "[$node] rsync KO → scp"; ssh "$node" 'mkdir -p ~/bug-bounty'; \
-         scp -q -r "${SRC}bb" "${SRC}scripts" "${SRC}requirements.txt" "$node:bug-bounty/"; }
+  # NB: pas de pipe sur rsync (sinon l'exit code de rsync est masqué par tail = faux positif).
+  if rsync -az \
+       --exclude '.git' --exclude '.muninn' --exclude 'data/programs/*.json' \
+       --exclude 'journal/*.jsonl' --exclude 'engagements/*' --exclude '__pycache__' \
+       --exclude '.venv' --exclude '.forge' --exclude '*.pyc' \
+       "$SRC" "$node:bug-bounty/" 2>/dev/null; then
+    echo "[$node]   rsync OK"
+  else
+    echo "[$node]   rsync indisponible → fallback scp"
+    ssh "$node" 'mkdir -p ~/bug-bounty'
+    if scp -q -r "${SRC}bb" "${SRC}scripts" "${SRC}templates" "${SRC}requirements.txt" \
+           "${SRC}pyproject.toml" "$node:bug-bounty/"; then
+      echo "[$node]   scp OK"
+    else
+      echo "[$node]   ❌ scp ÉCHEC"; continue
+    fi
+  fi
 
   echo "[$node] install outils ProjectDiscovery…"
   ssh "$node" 'cd ~/bug-bounty && bash scripts/install_tools.sh 2>&1 | tail -8'

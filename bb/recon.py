@@ -21,10 +21,6 @@ from .scope import Scope, normalize_host
 _UA = "bb-recon/0.1 (authorized bug bounty recon)"
 
 
-def has_tool(name: str) -> bool:
-    return shutil.which(name) is not None
-
-
 _PD_CACHE: dict[str, str] = {}
 _PD_DIRS = [os.path.expanduser(p) for p in
             ("~/.local/bin", "~/go/bin", "~/.pdtm/go/bin")] + ["/usr/local/bin"]
@@ -240,6 +236,8 @@ def _probe_httpx(hosts, timeout: int = 120):
             continue
         raw = d.get("input") or d.get("host") or d.get("url") or ""
         host = raw.split("://")[-1].split("/")[0].split(":")[0].lower()
+        if not host:
+            continue  # ligne JSON sans host exploitable → on ignore (pas de pollution)
 
         def _first(v):
             return (v[0] if isinstance(v, list) and v else v) or ""
@@ -275,7 +273,8 @@ def _scan_nuclei(results, scope: Scope, timeout: int = 600):
             d = json.loads(line)
         except ValueError:
             continue
-        host = (d.get("host") or "").split("://")[-1].split("/")[0].split(":")[0].lower()
+        raw_h = d.get("host") or d.get("matched-at") or d.get("matched_at") or d.get("url") or ""
+        host = raw_h.split("://")[-1].split("/")[0].split(":")[0].lower()
         info = d.get("info", {})
         if host in by_host:
             by_host[host].findings.append({
@@ -311,8 +310,16 @@ def basic_checks(result: HostResult, scope: Scope, *, get=_get) -> list:
     for path in _SENSITIVE:
         try:
             r = get(base + path)
-            body = (r.text or "")[:200]
-            if r.status_code == 200 and ("ref:" in body or "DB_" in body or "[core]" in body or "APP_" in body):
+            if r.status_code != 200:
+                continue
+            body = (r.text or "")[:500]
+            # Signature PAR type de fichier (réduit faux positifs ET faux négatifs) :
+            #   .env -> au moins une ligne VARIABLE=...  (REDIS_HOST, JWT_SECRET, etc.)
+            #   .git/config -> section [core] ; .git/HEAD -> commence par 'ref:'
+            hit = ((path.endswith(".env") and re.search(r"(?m)^[A-Z][A-Z0-9_]{2,}=", body))
+                   or (path.endswith("config") and "[core]" in body)
+                   or (path.endswith("HEAD") and body.strip().startswith("ref:")))
+            if hit:
                 findings.append({"type": "exposed-file", "detail": path, "severity": "medium",
                                  "evidence": body[:80]})
         except Exception:  # noqa: BLE001

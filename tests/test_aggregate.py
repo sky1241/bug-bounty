@@ -140,6 +140,13 @@ def test_starter_score_prefers_low_reports_and_fr():
     assert fresh.starter_score > mega.starter_score
 
 
+def test_parse_program_handles_malformed_targets():
+    """Un feed avec targets non-dict ne doit PAS crasher (robustesse)."""
+    for bad in (["liste"], "chaine", 42, None):
+        p = parse_program("hackerone", {"name": "T", "url": "u", "targets": bad})
+        assert p is not None and p.scope.in_scope == []
+
+
 def test_categorize():
     assert categorize("WILDCARD", "*.x.com") == "web"
     assert categorize("SMART_CONTRACT", "0xabc") == "web3"

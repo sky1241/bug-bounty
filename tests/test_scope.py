@@ -80,6 +80,20 @@ def test_ip_forms_canonicalized():
     assert _as_ip("pas-une-ip") is None
 
 
+def test_alternation_group_safe():
+    """Alternation YWH légitime OK, mais wildcard/branche-vide dans un groupe = rejeté."""
+    from bb.scope import _compile_pattern
+    assert Scope(in_scope=["www.x.(fr|ch)"]).allows("www.x.fr")        # légitime
+    assert Scope(in_scope=["www.x.(fr|ch)"]).allows("www.x.ch")
+    assert not Scope(in_scope=["www.x.(fr|ch)"]).allows("www.x.us")    # hors alternation
+    # VRAIE FUITE corrigée : '*' dans un groupe matcherait tout
+    assert not Scope(in_scope=["(*|x).com"]).allows("anything.com")
+    assert _compile_pattern("(*|x).com") is None
+    # branche vide
+    assert _compile_pattern("(a|).com") is None
+    assert _compile_pattern("(|a).com") is None
+
+
 def test_empty_pattern_never_matches():
     """Un pattern vide ne doit JAMAIS matcher (tue le mutant L137 False->True)."""
     from bb.scope import _pattern_matches

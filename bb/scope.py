@@ -100,6 +100,12 @@ def _compile_pattern(pattern: str):
         return None
     if any(c in p for c in "[]{}\\"):
         return None
+    # Contenu des groupes d'alternation (format YWH '(fr|ch)') : uniquement des labels
+    # simples. Un '*' dans un groupe se compilerait en '[^.]+' non ancré (sur-match :
+    # '(*|x).com' matcherait tout .com) ; une branche vide '(a|)' matcherait le vide.
+    for grp in re.findall(r"\(([^()]*)\)", p):
+        if "*" in grp or any(branch == "" for branch in grp.split("|")):
+            return None
     structural = re.sub(r"\([^()]+\)", "x", p)  # groupes d'alternation neutralisés
     if "|" in structural:
         return None  # '|' hors parenthèses = injection
