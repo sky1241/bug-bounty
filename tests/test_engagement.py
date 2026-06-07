@@ -15,6 +15,10 @@ def test_create_and_load_scope(tmp_path):
     assert (d / "scope.json").exists()
     assert (d / "recon").is_dir() and (d / "findings").is_dir()
     assert (d / "README.md").exists()
+    # Checklist du protocole général figée dans l'engagement (par le code)
+    checklist = (d / "CHECKLIST.md").read_text()
+    assert "Phase 0 — Cadrage" in checklist and "Phase 5 — Rapport" in checklist
+    assert "WSTG-ATHZ" in checklist and "anti-faux-positif" in checklist
     loaded = load_scope("Acme FR", base=tmp_path)
     assert loaded.in_scope == ["*.x.com"] and loaded.out_of_scope == ["admin.x.com"]
 
