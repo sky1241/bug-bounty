@@ -6,7 +6,8 @@ import json
 import sys
 from pathlib import Path
 
-from . import aggregate, report as report_mod, sources
+from . import aggregate, recon as recon_mod, report as report_mod, sources
+from .scope import Scope, normalize_host
 
 
 def _print_table(programs, limit: int, show_score: bool = False) -> None:
@@ -52,6 +53,16 @@ def main(argv=None) -> int:
     rp.add_argument("--draft", action="store_true", help="brouillon même si validation incomplète")
     rp.add_argument("--out", help="fichier de sortie (défaut: stdout)")
 
+    re_ = sub.add_parser("recon", help="recon in-scope d'un domaine (sous-domaines + probe)")
+    re_.add_argument("domain")
+    re_.add_argument("--program", help="programme pour charger le scope (recommandé)")
+    re_.add_argument("--authorized", action="store_true",
+                     help="affirmer l'autorisation si pas de --program (scope = domain + *.domain)")
+    re_.add_argument("--passive-only", action="store_true", help="aucun paquet actif")
+    re_.add_argument("--no-checks", action="store_true", help="probe sans les checks basiques")
+    re_.add_argument("--scan", action="store_true", help="lancer nuclei si présent (plus intrusif)")
+    re_.add_argument("--out", help="écrire le rapport JSON")
+
     args = ap.parse_args(argv)
 
     if args.cmd == "update":
@@ -82,6 +93,43 @@ def main(argv=None) -> int:
             print(f"Rapport écrit: {args.out}")
         else:
             print(md)
+        return 0
+
+    if args.cmd == "recon":
+        domain = normalize_host(args.domain) or args.domain.strip().lower()
+        if args.program:
+            feeds, ywh_api = sources.load()
+            progs = aggregate.aggregate(feeds)
+            aggregate.enrich_ywh(progs, ywh_api)
+            q = args.program.lower()
+            m = [p for p in progs if q in p.name.lower() or q in p.handle.lower()]
+            if not m:
+                print(f"Programme '{args.program}' introuvable (lance `bb update`).", file=sys.stderr)
+                return 1
+            scope = m[0].scope
+        elif args.authorized:
+            scope = Scope(in_scope=[domain, f"*.{domain}"])
+            print(f"⚠️  --authorized : tu affirmes être autorisé à tester {domain}.", file=sys.stderr)
+        else:
+            print("Refus: fournis --program <nom> (scope du programme), "
+                  "ou --authorized si tu es certain d'être in-scope.", file=sys.stderr)
+            return 2
+        rep = recon_mod.run(domain, scope, passive_only=args.passive_only,
+                            do_checks=not args.no_checks, do_scan=args.scan)
+        print(f"[{domain}] découverts={rep['discovered']} in-scope={rep['in_scope']} "
+              f"rejetés={rep['rejected']} vivants={rep.get('alive', '-')}  outils={rep['tools']}")
+        if rep.get("passive_errors"):
+            print(f"  ⚠️  sources passives en échec: {', '.join(rep['passive_errors'])}", file=sys.stderr)
+        for h in rep["hosts"][:40]:
+            line = f"  {h['host']}"
+            if h.get("status"):
+                line += f"  [{h['status']}] {h.get('title', '')[:48]}"
+            if h.get("findings"):
+                line += f"  ⚑ {len(h['findings'])} finding(s)"
+            print(line)
+        if args.out:
+            Path(args.out).write_text(json.dumps(rep, indent=2, ensure_ascii=False))
+            print(f"JSON: {args.out}")
         return 0
 
     feeds, ywh_api = sources.load()

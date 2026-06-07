@@ -1,33 +1,56 @@
 # bug-bounty
 
-Outillage personnel de bug bounty pour débutant. Deux modules :
+Outillage personnel de bug bounty pour débutant. **In-scope only.**
 
 1. **Agrégateur de programmes** — scanne les sources publiques (EN + FR), liste les
-   programmes ouverts avec leur **scope** et leur **prime**, filtre les cibles
-   « faciles débutant ».
-2. **Pipeline recon → scan → rapport** — sur les cibles **in-scope uniquement**.
+   programmes ouverts avec **scope** + **prime**, filtre les cibles « faciles débutant ».
+2. **Pipeline recon → probe → scan** — sur les cibles **in-scope uniquement**.
+3. **Générateur de rapport** — protocole standardisé + validation anti-faux-positif obligatoire.
 
 ## ⚠️ Règle légale — non négociable
 
 Ce projet ne touche **QUE** des cibles explicitement autorisées par le scope d'un
-programme de bug bounty (ou tes propres assets). Scanner une cible hors-scope =
-accès non autorisé = illégal (art. 323 CP en France, équivalent ailleurs) + ban
-plateforme. Le module [`bb/scope.py`](bb/scope.py) est le garde-fou : toute cible
-passe par lui avant d'être touchée, et **out-of-scope l'emporte toujours**.
+programme (ou tes propres assets). Scanner hors-scope = illégal + ban. Le module
+[`bb/scope.py`](bb/scope.py) est le garde-fou (audité : voir
+[docs/AUDIT_SCOPE_GUARD.md](docs/AUDIT_SCOPE_GUARD.md)) ; il est ré-appliqué entre chaque
+étape du recon.
 
-## État
+## Commandes
 
-🚧 En construction. Le cœur légal (scope guard + tests) est posé. Les modules
-d'agrégation et de recon sont en cours de design, sur la base d'une recherche
-vérifiée des sources et feeds disponibles.
+```bash
+python -m bb update                       # télécharge les feeds de programmes
+python -m bb list --starter --fr          # programmes FR triés anti-saturation
+python -m bb list --beginner --limit 20   # programmes débutant (cash + web + scope)
+python -m bb scope <nom>                  # affiche le scope exact d'un programme
+
+# Recon (in-scope only). --program charge le scope d'un vrai programme.
+python -m bb recon example.com --program <nom>           # recon + probe + checks
+python -m bb recon example.com --program <nom> --scan    # + nuclei (si installé)
+python -m bb recon example.com --authorized --passive-only   # OSINT, zéro paquet actif
+
+# Rapport (refuse tant que la Phase 0 anti-faux-positif n'est pas validée)
+python -m bb report finding.json --program <nom>
+```
+
+Le recon est **hybride** : il utilise subfinder/httpx/nuclei de **ProjectDiscovery**
+s'ils sont réellement installés (vérifié, pas juste un binaire homonyme), sinon il
+bascule sur un fallback pur Python (crt.sh + hackertarget pour les sous-domaines,
+`requests` pour le probe). Les sources en échec sont **remontées**, jamais avalées.
+
+## Rapports
+
+Tout rapport suit [docs/REPORTING_PROTOCOL.md](docs/REPORTING_PROTOCOL.md) et son
+[template](templates/report_template.md). La **Phase 0** (3 passes anti-faux-positif)
+est obligatoire — `bb/report.py` refuse de générer sinon.
 
 ## Structure
 
 ```
-bb/            # package Python
-  scope.py     # garde-fou in-scope (coeur légal)
-tests/         # tests unitaires
-data/programs/ # cache local des scopes téléchargés (gitignored)
+bb/            scope.py · aggregate.py · sources.py · recon.py · report.py · cli.py
+docs/          REPORTING_PROTOCOL.md · AUDIT_SCOPE_GUARD.md
+templates/     report_template.md
+tests/         33 tests + audit/ (replay du scope guard)
+data/programs/ cache local des feeds (gitignored)
 ```
 
 ## Dev
@@ -35,5 +58,5 @@ data/programs/ # cache local des scopes téléchargés (gitignored)
 ```bash
 python3 -m venv .venv && source .venv/bin/activate
 pip install -r requirements.txt
-python3 -m pytest tests/ -q
+PYTHONPATH=. python -m pytest tests/ -q
 ```
