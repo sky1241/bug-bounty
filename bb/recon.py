@@ -100,9 +100,11 @@ def _http_get_json(url: str, timeout: int = 30):
     return r.json()
 
 
-def _from_subfinder(domain: str) -> set[str]:
-    out = subprocess.run([pd_path("subfinder") or "subfinder", "-silent", "-d", domain],
-                         capture_output=True, text=True, timeout=300)
+def _from_subfinder(domain: str, max_minutes: int = 2) -> set[str]:
+    # -max-time borne l'énumération (défaut subfinder = 10 min, trop long pour la fleet).
+    out = subprocess.run(
+        [pd_path("subfinder") or "subfinder", "-silent", "-d", domain, "-max-time", str(max_minutes)],
+        capture_output=True, text=True, timeout=max_minutes * 60 + 30)
     return {l.strip().lower() for l in out.stdout.splitlines() if l.strip()}
 
 
