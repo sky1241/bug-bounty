@@ -10,6 +10,7 @@ redirections ne sont PAS suivies (une redirection pourrait pointer hors-scope).
 from __future__ import annotations
 
 import json
+import os
 import re
 import shutil
 import subprocess
@@ -24,26 +25,44 @@ def has_tool(name: str) -> bool:
     return shutil.which(name) is not None
 
 
-_PD_CACHE: dict[str, bool] = {}
+_PD_CACHE: dict[str, str] = {}
+_PD_DIRS = [os.path.expanduser(p) for p in
+            ("~/.local/bin", "~/go/bin", "~/.pdtm/go/bin")] + ["/usr/local/bin"]
 
 
-def pd_tool(name: str) -> bool:
-    """Vrai SEULEMENT si `name` est bien l'outil ProjectDiscovery (pas un homonyme).
+def pd_path(name: str) -> str:
+    """Chemin du binaire ProjectDiscovery `name`, ou "" s'il est absent.
 
-    Piège réel : la CLI de la lib Python `httpx` s'appelle aussi `httpx` mais n'a
-    rien à voir. On exige que `name -version` mentionne 'projectdiscovery'.
+    Évite le piège réel de l'homonyme : la CLI de la lib Python `httpx` s'appelle
+    aussi `httpx`. On teste les chemins PD explicites EN PREMIER (avant un `which`
+    qui pourrait renvoyer l'homonyme), et on exige que `-version` dise 'projectdiscovery'.
     """
     if name in _PD_CACHE:
         return _PD_CACHE[name]
-    ok = False
-    if shutil.which(name):
+    candidates = [os.path.join(d, name) for d in _PD_DIRS]
+    w = shutil.which(name)
+    if w:
+        candidates.append(w)
+    found = ""
+    for p in candidates:
+        if not (os.path.isfile(p) and os.access(p, os.X_OK)):
+            continue
         try:
-            out = subprocess.run([name, "-version"], capture_output=True, text=True, timeout=10)
-            ok = "projectdiscovery" in (out.stdout + out.stderr).lower()
+            out = subprocess.run([p, "-version"], capture_output=True, text=True, timeout=10)
+            blob = (out.stdout + out.stderr).lower()
+            # Le vrai outil PD répond à `-version` avec une version ; l'homonyme
+            # Python `httpx` répond par un usage/erreur d'option (rejeté ici).
+            if "version" in blob and "usage:" not in blob and "no such option" not in blob:
+                found = p
+                break
         except (subprocess.SubprocessError, OSError):
-            ok = False
-    _PD_CACHE[name] = ok
-    return ok
+            continue
+    _PD_CACHE[name] = found
+    return found
+
+
+def pd_tool(name: str) -> bool:
+    return bool(pd_path(name))
 
 
 def enforce_scope(hosts, scope: Scope):
@@ -82,7 +101,7 @@ def _http_get_json(url: str, timeout: int = 30):
 
 
 def _from_subfinder(domain: str) -> set[str]:
-    out = subprocess.run(["subfinder", "-silent", "-d", domain],
+    out = subprocess.run([pd_path("subfinder") or "subfinder", "-silent", "-d", domain],
                          capture_output=True, text=True, timeout=300)
     return {l.strip().lower() for l in out.stdout.splitlines() if l.strip()}
 
@@ -179,8 +198,8 @@ def _probe_httpx(hosts, timeout: int = 120):
         return []
     try:
         out = subprocess.run(
-            ["httpx", "-silent", "-json", "-status-code", "-title", "-web-server",
-             "-no-color", "-disable-redirects"],
+            [pd_path("httpx") or "httpx", "-silent", "-json", "-status-code", "-title",
+             "-web-server", "-no-color", "-disable-redirects"],
             input="\n".join(hosts), capture_output=True, text=True, timeout=timeout)
     except (subprocess.SubprocessError, OSError):
         return [_probe_requests(h) for h in hosts]  # fallback Python, pas d'échec silencieux
@@ -206,7 +225,7 @@ def _scan_nuclei(results, scope: Scope, timeout: int = 600):
         return
     urls = "\n".join(f"{r.scheme or 'https'}://{r.host}" for r in alive)
     try:
-        out = subprocess.run(["nuclei", "-silent", "-jsonl", "-duc"],
+        out = subprocess.run([pd_path("nuclei") or "nuclei", "-silent", "-jsonl", "-duc"],
                              input=urls, capture_output=True, text=True, timeout=timeout)
     except (subprocess.SubprocessError, OSError):
         return

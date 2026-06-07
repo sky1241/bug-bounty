@@ -6,7 +6,7 @@ import json
 import sys
 from pathlib import Path
 
-from . import aggregate, journal, recon as recon_mod, report as report_mod, sources
+from . import aggregate, fleet, journal, recon as recon_mod, report as report_mod, sources
 from .scope import Scope, normalize_host
 
 
@@ -54,14 +54,22 @@ def main(argv=None) -> int:
     rp.add_argument("--out", help="fichier de sortie (défaut: stdout)")
 
     re_ = sub.add_parser("recon", help="recon in-scope d'un domaine (sous-domaines + probe)")
-    re_.add_argument("domain")
+    re_.add_argument("domains", nargs="+", help="un ou plusieurs domaines (shard de la fleet)")
     re_.add_argument("--program", help="programme pour charger le scope (recommandé)")
+    re_.add_argument("--scope-file", help="scope JSON {in_scope,out_of_scope} ('-' = stdin, mode worker)")
     re_.add_argument("--authorized", action="store_true",
                      help="affirmer l'autorisation si pas de --program (scope = domain + *.domain)")
     re_.add_argument("--passive-only", action="store_true", help="aucun paquet actif")
     re_.add_argument("--no-checks", action="store_true", help="probe sans les checks basiques")
     re_.add_argument("--scan", action="store_true", help="lancer nuclei si présent (plus intrusif)")
-    re_.add_argument("--out", help="écrire le rapport JSON")
+    re_.add_argument("--json", action="store_true", help="sortir le JSON sur stdout (mode worker)")
+    re_.add_argument("--out", help="écrire le rapport JSON dans un fichier")
+
+    fp = sub.add_parser("fleet", help="recon distribué sur la fleet (sky-master + cousins)")
+    fp.add_argument("program", help="nom du programme (scope + domaines in-scope)")
+    fp.add_argument("--nodes", default="local", help="alias SSH séparés par virgule (ex: pc1,pc3,local)")
+    fp.add_argument("--scan", action="store_true", help="passer --scan aux workers")
+    fp.add_argument("--out", help="écrire les résultats agrégés (JSON)")
 
     jp = sub.add_parser("journal", help="historique des tests (le « dictionnaire » du projet)")
     jp.add_argument("action", nargs="?", default="summary", choices=["summary", "list", "add"])
@@ -77,6 +85,34 @@ def main(argv=None) -> int:
         print("Téléchargement des feeds (bounty-targets-data + API YesWeHack)…")
         sources.update()
         print("OK. Cache: data/programs/")
+        return 0
+
+    if args.cmd == "fleet":
+        feeds, ywh_api = sources.load()
+        progs = aggregate.aggregate(feeds)
+        aggregate.enrich_ywh(progs, ywh_api)
+        q = args.program.lower()
+        m = [p for p in progs if q in p.name.lower() or q in p.handle.lower()]
+        if not m:
+            print(f"Programme '{args.program}' introuvable (lance `bb update`).", file=sys.stderr)
+            return 1
+        scope = m[0].scope
+        domains = fleet.seed_domains(scope)
+        if not domains:
+            print("Aucun domaine-graine exploitable dans ce scope.", file=sys.stderr)
+            return 1
+        nodes = [fleet.Node(n.strip()) for n in args.nodes.split(",") if n.strip()]
+        print(f"Distribution de {len(domains)} domaine(s) sur {len(nodes)} nœud(s) "
+              f"{[n.name for n in nodes]}", file=sys.stderr)
+        results = fleet.distribute(domains, scope, nodes, runner=fleet.ssh_runner)
+        for r in results:
+            print(f"  {'✅' if r.get('ok') else '❌'} {r['node']}: {r.get('error') or 'ok'}")
+        journal.record("recon", args.program, mode="fleet",
+                       nodes=[n.name for n in nodes], domains=len(domains),
+                       ok_nodes=sum(1 for r in results if r.get("ok")))
+        if args.out:
+            Path(args.out).write_text(json.dumps(results, indent=2, ensure_ascii=False))
+            print(f"Résultats: {args.out}", file=sys.stderr)
         return 0
 
     if args.cmd == "journal":
@@ -124,8 +160,13 @@ def main(argv=None) -> int:
         return 0
 
     if args.cmd == "recon":
-        domain = normalize_host(args.domain) or args.domain.strip().lower()
-        if args.program:
+        domains = [normalize_host(d) or d.strip().lower() for d in args.domains]
+        # Résolution du scope : --scope-file (worker) | --program | --authorized
+        if args.scope_file:
+            raw = sys.stdin.read() if args.scope_file == "-" else Path(args.scope_file).read_text()
+            sc = json.loads(raw)
+            scope = Scope(in_scope=sc.get("in_scope", []), out_of_scope=sc.get("out_of_scope", []))
+        elif args.program:
             feeds, ywh_api = sources.load()
             progs = aggregate.aggregate(feeds)
             aggregate.enrich_ywh(progs, ywh_api)
@@ -136,31 +177,43 @@ def main(argv=None) -> int:
                 return 1
             scope = m[0].scope
         elif args.authorized:
-            scope = Scope(in_scope=[domain, f"*.{domain}"])
-            print(f"⚠️  --authorized : tu affirmes être autorisé à tester {domain}.", file=sys.stderr)
+            scope = Scope(in_scope=[p for d in domains for p in (d, f"*.{d}")])
+            print(f"⚠️  --authorized : tu affirmes être autorisé à tester {', '.join(domains)}.",
+                  file=sys.stderr)
         else:
-            print("Refus: fournis --program <nom> (scope du programme), "
-                  "ou --authorized si tu es certain d'être in-scope.", file=sys.stderr)
+            print("Refus: fournis --scope-file, --program <nom>, ou --authorized.", file=sys.stderr)
             return 2
-        rep = recon_mod.run(domain, scope, passive_only=args.passive_only,
-                            do_checks=not args.no_checks, do_scan=args.scan)
-        print(f"[{domain}] découverts={rep['discovered']} in-scope={rep['in_scope']} "
-              f"rejetés={rep['rejected']} vivants={rep.get('alive', '-')}  outils={rep['tools']}")
-        if rep.get("passive_errors"):
-            print(f"  ⚠️  sources passives en échec: {', '.join(rep['passive_errors'])}", file=sys.stderr)
-        journal.record("recon", domain, in_scope=rep["in_scope"], rejected=rep["rejected"],
-                       alive=rep.get("alive"), passive_errors=rep.get("passive_errors") or [],
-                       findings=sum(len(h.get("findings", [])) for h in rep["hosts"]))
-        for h in rep["hosts"][:40]:
-            line = f"  {h['host']}"
-            if h.get("status"):
-                line += f"  [{h['status']}] {h.get('title', '')[:48]}"
-            if h.get("findings"):
-                line += f"  ⚑ {len(h['findings'])} finding(s)"
-            print(line)
+
+        reports = []
+        for dom in domains:
+            rep = recon_mod.run(dom, scope, passive_only=args.passive_only,
+                                do_checks=not args.no_checks, do_scan=args.scan)
+            reports.append(rep)
+            journal.record("recon", dom, in_scope=rep["in_scope"], rejected=rep["rejected"],
+                           alive=rep.get("alive"), passive_errors=rep.get("passive_errors") or [],
+                           findings=sum(len(h.get("findings", [])) for h in rep["hosts"]))
+            # Résumé lisible sur stderr (stdout réservé au JSON en mode worker)
+            stream = sys.stderr if args.json else sys.stdout
+            print(f"[{dom}] découverts={rep['discovered']} in-scope={rep['in_scope']} "
+                  f"rejetés={rep['rejected']} vivants={rep.get('alive', '-')} outils={rep['tools']}",
+                  file=stream)
+            if rep.get("passive_errors"):
+                print(f"  ⚠️  sources passives en échec: {', '.join(rep['passive_errors'])}", file=sys.stderr)
+            if not args.json:
+                for h in rep["hosts"][:40]:
+                    line = f"  {h['host']}"
+                    if h.get("status"):
+                        line += f"  [{h['status']}] {h.get('title', '')[:48]}"
+                    if h.get("findings"):
+                        line += f"  ⚑ {len(h['findings'])} finding(s)"
+                    print(line)
+
+        payload = reports[0] if len(reports) == 1 else reports
+        if args.json:
+            print(json.dumps(payload, ensure_ascii=False))
         if args.out:
-            Path(args.out).write_text(json.dumps(rep, indent=2, ensure_ascii=False))
-            print(f"JSON: {args.out}")
+            Path(args.out).write_text(json.dumps(payload, indent=2, ensure_ascii=False))
+            print(f"JSON: {args.out}", file=sys.stderr)
         return 0
 
     feeds, ywh_api = sources.load()
