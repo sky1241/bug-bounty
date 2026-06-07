@@ -68,7 +68,8 @@ def test_passive_urls_filtered_by_scope():
             ["https://app.example.com/a?id=1"],
             ["https://evil.com/x"],                          # hors-scope
             ["http://shop.example.com/b"]]
-    urls, errs = passive_urls("example.com", Scope(in_scope=["*.example.com"]), fetch=lambda u: rows)
+    urls, errs = passive_urls("example.com", Scope(in_scope=["*.example.com"]),
+                              fetch=lambda u: rows, with_gau=False)
     assert "https://app.example.com/a?id=1" in urls
     assert "http://shop.example.com/b" in urls
     assert all("evil.com" not in u for u in urls)            # défense en profondeur

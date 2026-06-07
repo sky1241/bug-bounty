@@ -1,48 +1,61 @@
 #!/usr/bin/env bash
-# Installe les outils recon ProjectDiscovery (subfinder, httpx, nuclei) dans ~/.local/bin.
-# Via `go install` si Go est présent, sinon via les binaires des releases GitHub.
-# Idempotent : relançable sans risque. Cible: Linux amd64.
+# Installe le SETUP RECON COMPLET dans ~/.local/bin.
+# Core (ProjectDiscovery): subfinder, httpx, nuclei, dnsx, katana, naabu.
+# Extra: gau (lc/gau), ffuf. Via `go install` si Go OK, sinon binaires des releases.
+# Idempotent. Cible: Linux amd64.
 set -uo pipefail
 
 BIN_DIR="${BIN_DIR:-$HOME/.local/bin}"
 mkdir -p "$BIN_DIR"
 
-declare -A GOPKG=(
-  [subfinder]="github.com/projectdiscovery/subfinder/v2/cmd/subfinder"
-  [httpx]="github.com/projectdiscovery/httpx/cmd/httpx"
-  [nuclei]="github.com/projectdiscovery/nuclei/v3/cmd/nuclei"
-)
-declare -A REPO=(
-  [subfinder]="projectdiscovery/subfinder"
-  [httpx]="projectdiscovery/httpx"
-  [nuclei]="projectdiscovery/nuclei"
+# name : github_repo : go_package
+TOOLS=(
+  "subfinder:projectdiscovery/subfinder:github.com/projectdiscovery/subfinder/v2/cmd/subfinder"
+  "httpx:projectdiscovery/httpx:github.com/projectdiscovery/httpx/cmd/httpx"
+  "nuclei:projectdiscovery/nuclei:github.com/projectdiscovery/nuclei/v3/cmd/nuclei"
+  "dnsx:projectdiscovery/dnsx:github.com/projectdiscovery/dnsx/cmd/dnsx"
+  "katana:projectdiscovery/katana:github.com/projectdiscovery/katana/cmd/katana"
+  "naabu:projectdiscovery/naabu:github.com/projectdiscovery/naabu/v2/cmd/naabu"
+  "gau:lc/gau:github.com/lc/gau/v2/cmd/gau"
+  "ffuf:ffuf/ffuf:github.com/ffuf/ffuf/v2"
 )
 
 install_via_release() {
-  local name="$1" repo="$2" tmp url
+  local name="$1" repo="$2" tmp url bin
   url=$(curl -fsSL "https://api.github.com/repos/$repo/releases/latest" \
-        | grep -oE "https://[^\"]*${name}_[0-9.]+_linux_amd64\.zip" | head -1)
+        | grep -oiE "https://[^\"]*linux[_-]amd64[^\"]*\.(zip|tar\.gz)" | head -1)
   [ -n "$url" ] || { echo "  $name: URL release introuvable"; return 1; }
   tmp=$(mktemp -d)
-  curl -fsSL "$url" -o "$tmp/$name.zip" && unzip -oq "$tmp/$name.zip" -d "$tmp" \
-    && install -m755 "$tmp/$name" "$BIN_DIR/$name" && echo "  $name: installé (release)"
+  curl -fsSL "$url" -o "$tmp/arc" || { rm -rf "$tmp"; return 1; }
+  case "$url" in
+    *.zip)    unzip -oq "$tmp/arc" -d "$tmp" 2>/dev/null ;;
+    *.tar.gz) tar xzf "$tmp/arc" -C "$tmp" 2>/dev/null ;;
+  esac
+  bin=$(find "$tmp" -type f -name "$name" 2>/dev/null | head -1)
+  if [ -n "$bin" ]; then install -m755 "$bin" "$BIN_DIR/$name"; echo "  $name: installé (release)";
+  else echo "  $name: binaire introuvable dans l'archive"; fi
   rm -rf "$tmp"
 }
 
-for tool in subfinder httpx nuclei; do
-  echo "== $tool =="
-  if command -v go >/dev/null 2>&1; then
-    GOBIN="$BIN_DIR" go install "${GOPKG[$tool]}@latest" 2>&1 | tail -1 \
-      && echo "  $tool: installé (go)" || install_via_release "$tool" "${REPO[$tool]}"
+for entry in "${TOOLS[@]}"; do
+  IFS=: read -r name repo gopkg <<<"$entry"
+  echo "== $name =="
+  if [ -x "$BIN_DIR/$name" ]; then echo "  déjà présent"; continue; fi
+  if command -v go >/dev/null 2>&1 && [ -n "$gopkg" ]; then
+    GOBIN="$BIN_DIR" GOTOOLCHAIN=auto go install "${gopkg}@latest" 2>/dev/null \
+      && echo "  $name: installé (go)" || install_via_release "$name" "$repo"
   else
-    install_via_release "$tool" "${REPO[$tool]}"
+    install_via_release "$name" "$repo"
   fi
 done
 
 echo ""
-echo "== Vérification (doit dire projectdiscovery) =="
-for t in subfinder httpx nuclei; do
-  v=$("$BIN_DIR/$t" -version 2>&1 | head -1)
-  echo "  $t -> ${v:-ABSENT}"
+echo "== Vérification =="
+for entry in "${TOOLS[@]}"; do
+  IFS=: read -r name _ _ <<<"$entry"
+  if [ -x "$BIN_DIR/$name" ]; then
+    v=$("$BIN_DIR/$name" -version 2>&1 | grep -oiE "v?[0-9]+\.[0-9]+\.[0-9]+" | head -1)
+    echo "  $name -> ${v:-présent}"
+  else echo "  $name -> ABSENT"; fi
 done
-case ":$PATH:" in *":$BIN_DIR:"*) ;; *) echo "⚠️  Ajoute $BIN_DIR au PATH (export PATH=\"$BIN_DIR:\$PATH\")";; esac
+case ":$PATH:" in *":$BIN_DIR:"*) ;; *) echo "⚠️  Ajoute $BIN_DIR au PATH";; esac

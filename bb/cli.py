@@ -99,6 +99,7 @@ def main(argv=None) -> int:
         print("Python :", {k: ("OK" if v else "MANQUANT") for k, v in rep["python_deps"].items()})
         print("Outils PD :", {k: (f"{rep['versions'].get(k) or '?'}" if v else "absent")
                                for k, v in rep["pd_tools"].items()})
+        print("Extra :", {k: ("présent" if v else "absent") for k, v in rep.get("extra_tools", {}).items()})
         for w in rep["warnings"]:
             print(f"  ⚠️  {w}")
         print("\n" + ("✅ PRÊT à scanner" if rep["ready"] else "❌ PAS PRÊT (installe les deps requises)"))

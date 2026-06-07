@@ -61,6 +61,52 @@ def pd_tool(name: str) -> bool:
     return bool(pd_path(name))
 
 
+def _bin(name: str) -> str:
+    """Chemin d'un binaire (PD ou non), par présence — pour gau/ffuf/katana etc."""
+    p = os.path.expanduser(f"~/.local/bin/{name}")
+    if os.path.isfile(p) and os.access(p, os.X_OK):
+        return p
+    return shutil.which(name) or ""
+
+
+def resolve_dnsx(hosts, timeout: int = 120):
+    """Résout via dnsx : retourne (hosts_qui_résolvent, {host: cname}).
+
+    Filtre les faux hosts (wildcard DNS) et récupère le CNAME (signal de takeover).
+    Si dnsx échoue, on ne filtre pas (conservateur : garder tout).
+    """
+    hosts = list(hosts)
+    if not hosts:
+        return set(), {}
+    try:
+        out = subprocess.run([pd_path("dnsx") or "dnsx", "-silent", "-a", "-cname", "-json"],
+                             input="\n".join(hosts), capture_output=True, text=True, timeout=timeout)
+    except (subprocess.SubprocessError, OSError):
+        return set(hosts), {}
+    resolved, cnames = set(), {}
+    for line in out.stdout.splitlines():
+        try:
+            d = json.loads(line)
+        except ValueError:
+            continue
+        h = (d.get("host") or "").lower()
+        if not h:
+            continue
+        resolved.add(h)
+        cn = d.get("cname")
+        if cn:
+            cnames[h] = cn[0] if isinstance(cn, list) and cn else cn
+    return resolved, cnames
+
+
+def _from_gau(domain: str) -> set[str]:
+    gau = _bin("gau")
+    if not gau:
+        return set()
+    out = subprocess.run([gau, "--subs", domain], capture_output=True, text=True, timeout=120)
+    return {l.strip() for l in out.stdout.splitlines() if l.strip()}
+
+
 def enforce_scope(hosts, scope: Scope):
     """Filtre : ne garde que les hosts in-scope. Retourne (gardés triés, rejetés)."""
     kept, rejected = set(), []
@@ -145,25 +191,35 @@ def passive_subdomains(domain: str, *, fetch=_http_get_json):
     return subs, errors
 
 
-def passive_urls(domain: str, scope: Scope, *, fetch=_http_get_json, limit: int = 3000):
-    """URLs historiques via l'API Wayback CDX (passif/OSINT). Re-filtrées par scope.
+def passive_urls(domain: str, scope: Scope, *, fetch=_http_get_json, limit: int = 3000,
+                 with_gau: bool = True):
+    """URLs historiques (Wayback CDX + gau), passif/OSINT, re-filtrées par scope.
 
     Multiplicateur de surface : IDOR, open redirect, XSS réfléchi, fichiers oubliés
-    vivent dans des URL paramétrées que seul Wayback révèle. Aucun paquet vers la cible.
+    vivent dans des URL paramétrées. gau ajoute CommonCrawl/AlienVault/URLScan.
+    Aucun paquet vers la cible. Chaque URL repasse par Scope.allows (défense en profondeur).
     """
-    url = (f"http://web.archive.org/cdx/search/cdx?url=*.{domain}/*"
+    urls, errors = [], []
+    cdx = (f"http://web.archive.org/cdx/search/cdx?url=*.{domain}/*"
            f"&output=json&fl=original&collapse=urlkey&limit={limit}")
     try:
-        rows = fetch(url)
+        rows = fetch(cdx)
+        for row in (rows or [])[1:]:  # 1re ligne = en-tête
+            u = row[0] if isinstance(row, list) and row else (row if isinstance(row, str) else "")
+            host = normalize_host(u)
+            if host and scope.allows(host):
+                urls.append(u)
     except Exception:  # noqa: BLE001
-        return [], ["wayback: erreur"]
-    urls = []
-    for row in (rows or [])[1:]:  # 1re ligne = en-tête
-        u = row[0] if isinstance(row, list) and row else (row if isinstance(row, str) else "")
-        host = normalize_host(u)
-        if host and scope.allows(host):  # défense en profondeur (une URL peut sortir du scope)
-            urls.append(u)
-    return sorted(set(urls)), []
+        errors.append("wayback: erreur")
+    if with_gau:
+        try:
+            for u in _from_gau(domain):
+                host = normalize_host(u)
+                if host and scope.allows(host):
+                    urls.append(u)
+        except Exception:  # noqa: BLE001
+            errors.append("gau: erreur")
+    return sorted(set(urls)), errors
 
 
 # ── Probe HTTP (actif léger, in-scope only) ─────────────────────────────────
@@ -338,6 +394,10 @@ def run(domain: str, scope: Scope, *, passive_only: bool = False, do_checks: boo
     """
     subs, passive_errors = passive_subdomains(domain)
     in_scope, rejected = enforce_scope(subs | {domain}, scope)
+    cnames = {}
+    if prober is None and use_tools and pd_tool("dnsx") and in_scope:
+        resolved, cnames = resolve_dnsx(in_scope)
+        in_scope = [h for h in in_scope if h in resolved] or in_scope  # filtre les faux hosts
     urls = []
     if collect_urls:
         urls, url_errs = passive_urls(domain, scope)
@@ -349,8 +409,9 @@ def run(domain: str, scope: Scope, *, passive_only: bool = False, do_checks: boo
         "rejected": len(rejected),
         "urls": len(urls),
         "url_list": urls[:500],
+        "cnames": cnames,  # host -> CNAME (signal de subdomain takeover)
         "passive_errors": passive_errors,  # remontée explicite (pas de silence)
-        "tools": {n: pd_tool(n) for n in ("subfinder", "httpx", "nuclei")},
+        "tools": {n: pd_tool(n) for n in ("subfinder", "httpx", "nuclei", "dnsx", "katana", "naabu")},
         "hosts": [],
     }
     if passive_only:
