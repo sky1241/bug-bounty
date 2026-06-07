@@ -28,4 +28,5 @@ data/programs/*.json
 # Journal des tests : local par securite (peut contenir cibles/findings).
 # Retire ces 2 lignes si tu veux versionner ton historique.
 journal/*.jsonl
+journal/*.log
 !journal/.gitkeep

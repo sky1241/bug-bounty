@@ -65,6 +65,8 @@ bb update         # à lancer régulièrement (ex: cron quotidien) pour des scop
 
 ## État
 
-- ✅ Logique de distribution (`bb/fleet.py`) + orchestrateur (`bb fleet`) + mode worker
-  (`bb recon --scope-file - --json`) — testés.
-- 🔜 Déploiement automatique du repo + outils sur pc1/pc3.
+- ✅ Logique de distribution (`bb/fleet.py`) + orchestrateur (`bb fleet`) + mode worker — testés.
+- ✅ Outils PD (subfinder/httpx/nuclei) déployés sur **pc1 et pc3** (`scripts/deploy_fleet.sh`).
+- ✅ **Fleet prouvée end-to-end** : pc1 (9393 in-scope) et pc3 (3204 in-scope) exécutent le
+  recon à distance sur example.com, scope respecté, JSON retourné.
+- ✅ Feeds rafraîchis quotidiennement (cron `bb update` sur sky-master, 06:30).
