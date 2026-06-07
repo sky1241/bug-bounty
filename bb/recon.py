@@ -278,9 +278,11 @@ def _probe_httpx(hosts, timeout: int = 120):
         return []
     try:
         out = subprocess.run(
+            # NB: pas de '-disable-redirects' (flag inexistant qui CASSE la sortie JSON) ;
+            # httpx ne suit PAS les redirects par défaut, ce qu'on veut (anti hors-scope).
             [pd_path("httpx") or "httpx", "-silent", "-json", "-status-code", "-title",
              "-web-server", "-tech-detect", "-favicon", "-cdn", "-ip", "-cname",
-             "-no-color", "-disable-redirects", "-rate-limit", "100"],
+             "-no-color", "-rate-limit", "100"],
             input="\n".join(hosts), capture_output=True, text=True, timeout=timeout)
     except (subprocess.SubprocessError, OSError):
         return [_probe_requests(h) for h in hosts]  # fallback Python, pas d'échec silencieux
@@ -397,8 +399,8 @@ def naabu_ports(hosts, scope: Scope, *, top_ports: str = "100", timeout: int = 3
         h = (d.get("host") or "").lower()
         p = d.get("port")
         if h and p and scope.allows(h):
-            ports.setdefault(h, []).append(p)
-    return ports
+            ports.setdefault(h, set()).add(p)
+    return {h: sorted(v) for h, v in ports.items()}   # dédupliqué + trié
 
 
 def basic_checks(result: HostResult, scope: Scope, *, get=_get) -> list:
@@ -489,9 +491,10 @@ def run(domain: str, scope: Scope, *, passive_only: bool = False, do_checks: boo
         if crawled:
             merged = sorted(set(report.get("url_list", [])) | set(crawled))
             report["url_list"], report["urls"] = merged[:1000], len(merged)
-    # Ports (naabu) — opt-in car actif/intrusif
-    if do_ports and prober is None and alive_hosts:
-        report["ports"] = naabu_ports(alive_hosts, scope)
+    # Ports (naabu) — opt-in. Sur les hosts in-scope RÉSOLUS (pas seulement web-vivants :
+    # un host peut n'avoir que SSH/22 ouvert, sans serveur web).
+    if do_ports and prober is None and in_scope:
+        report["ports"] = naabu_ports(in_scope, scope)
 
     report["hosts"] = [asdict(r) for r in results]
     report["alive"] = len(alive_hosts)

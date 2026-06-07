@@ -62,6 +62,20 @@ def test_basic_checks_env_no_false_positive():
     assert not any(f.get("type") == "exposed-file" for f in findings)   # zéro faux positif
 
 
+def test_naabu_ports_deduplicated(monkeypatch):
+    """naabu sort plusieurs lignes par port → on déduplique (pas de 22,22,22)."""
+    import bb.recon as recon
+
+    class Out:
+        stdout = ('{"host":"x.com","port":22}\n{"host":"x.com","port":22}\n'
+                  '{"host":"x.com","port":80}\n{"host":"evil.com","port":443}\n')
+
+    monkeypatch.setattr(recon, "pd_path", lambda n: "/fake/naabu")
+    monkeypatch.setattr(recon.subprocess, "run", lambda *a, **k: Out())
+    res = recon.naabu_ports(["x.com"], Scope(in_scope=["*.com"]))
+    assert res == {"x.com": [22, 80]}       # dédupliqué, trié, et evil.com hors-scope exclu
+
+
 def test_passive_urls_filtered_by_scope():
     from bb.recon import passive_urls
     rows = [["original"],                                   # en-tête CDX
