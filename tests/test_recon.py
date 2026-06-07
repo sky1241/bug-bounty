@@ -67,13 +67,13 @@ def test_naabu_ports_deduplicated(monkeypatch):
     import bb.recon as recon
 
     class Out:
-        stdout = ('{"host":"x.com","port":22}\n{"host":"x.com","port":22}\n'
-                  '{"host":"x.com","port":80}\n{"host":"evil.com","port":443}\n')
+        stdout = ('{"host":"a.example.com","port":22}\n{"host":"a.example.com","port":22}\n'
+                  '{"host":"a.example.com","port":80}\n{"host":"evil.com","port":443}\n')
 
     monkeypatch.setattr(recon, "pd_path", lambda n: "/fake/naabu")
     monkeypatch.setattr(recon.subprocess, "run", lambda *a, **k: Out())
-    res = recon.naabu_ports(["x.com"], Scope(in_scope=["*.com"]))
-    assert res == {"x.com": [22, 80]}       # dédupliqué, trié, et evil.com hors-scope exclu
+    res = recon.naabu_ports(["a.example.com"], Scope(in_scope=["*.example.com"]))
+    assert res == {"a.example.com": [22, 80]}   # dédupliqué, trié, evil.com hors-scope exclu
 
 
 def test_passive_urls_filtered_by_scope():
