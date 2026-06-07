@@ -32,6 +32,17 @@ python -m bb recon example.com --authorized --passive-only   # OSINT, zéro paqu
 python -m bb report finding.json --program <nom>
 ```
 
+### Conteneur isolé par projet
+
+Chaque engagement peut tourner dans son **propre conteneur** Docker (isolation système
+totale entre projets) — workspace = le dossier d'engagement, données en lecture seule :
+
+```bash
+python -m bb scan "<programme>" --go                  # crée engagements/<slug>/
+bash scripts/project_run.sh <slug> doctor             # conteneur dédié bb-<slug>
+bash scripts/project_run.sh <slug> recon www.cible.tld --scope-file /work/scope.json --out /work/recon/out.json
+```
+
 Le recon est **hybride** : il utilise subfinder/httpx/nuclei de **ProjectDiscovery**
 s'ils sont réellement installés (vérifié, pas juste un binaire homonyme), sinon il
 bascule sur un fallback pur Python (crt.sh + hackertarget pour les sous-domaines,

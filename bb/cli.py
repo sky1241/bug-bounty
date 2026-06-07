@@ -140,7 +140,8 @@ def main(argv=None) -> int:
         tools = ", ".join(t for t, v in drep["pd_tools"].items() if v) or "fallback Python"
         print(f"  ✅ Engagement prêt: {d}")
         print(f"     Outils dispo: {tools}")
-        print(f"     → recon distribué: bb fleet \"{p.name}\" --nodes pc1,pc3,local")
+        print(f"     → conteneur isolé du projet : bash scripts/project_run.sh {d.name} doctor")
+        print(f"     → recon distribué (fleet)   : bb fleet \"{p.name}\" --nodes pc1,pc3,local")
         return 0
 
     if args.cmd == "fleet":
