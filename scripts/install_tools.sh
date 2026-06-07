@@ -18,12 +18,24 @@ TOOLS=(
   "naabu:projectdiscovery/naabu:github.com/projectdiscovery/naabu/v2/cmd/naabu"
   "gau:lc/gau:github.com/lc/gau/v2/cmd/gau"
   "ffuf:ffuf/ffuf:github.com/ffuf/ffuf/v2"
+  "asnmap:projectdiscovery/asnmap:github.com/projectdiscovery/asnmap/cmd/asnmap"
+  "tlsx:projectdiscovery/tlsx:github.com/projectdiscovery/tlsx/cmd/tlsx"
+  "cdncheck:projectdiscovery/cdncheck:github.com/projectdiscovery/cdncheck/cmd/cdncheck"
+  "interactsh-client:projectdiscovery/interactsh:github.com/projectdiscovery/interactsh/cmd/interactsh-client"
+  "notify:projectdiscovery/notify:github.com/projectdiscovery/notify/cmd/notify"
+  "dalfox:hahwul/dalfox:github.com/hahwul/dalfox/v2"
+  "trufflehog:trufflesecurity/trufflehog:github.com/trufflesecurity/trufflehog/v3"
+  "anew:tomnomnom/anew:github.com/tomnomnom/anew"
+  "gf:tomnomnom/gf:github.com/tomnomnom/gf"
+  "qsreplace:tomnomnom/qsreplace:github.com/tomnomnom/qsreplace"
 )
 
 install_via_release() {
   local name="$1" repo="$2" tmp url bin
+  # amd64 OU x86_64 (goreleaser varie selon les projets), jamais arm/aarch64
   url=$(curl -fsSL "https://api.github.com/repos/$repo/releases/latest" \
-        | grep -oiE "https://[^\"]*linux[_-]amd64[^\"]*\.(zip|tar\.gz)" | head -1)
+        | grep -oiE "https://[^\"]*[lL]inux[_-]?(amd64|x86_64)[^\"]*\.(zip|tar\.gz)" \
+        | grep -viE "arm|aarch" | head -1)
   [ -n "$url" ] || { echo "  $name: URL release introuvable"; return 1; }
   tmp=$(mktemp -d)
   curl -fsSL "$url" -o "$tmp/arc" || { rm -rf "$tmp"; return 1; }

@@ -15,8 +15,10 @@ from . import recon
 
 REQUIRED_PY = ["requests"]
 CORE_PD = ["subfinder", "httpx", "nuclei"]          # critiques (fallback Python sinon)
-PD_TOOLS = CORE_PD + ["dnsx", "katana", "naabu"]    # détectés via pd_path (-version)
-EXTRA_TOOLS = ["gau", "ffuf"]                        # détectés par présence (flag version variable)
+PD_TOOLS = CORE_PD + ["dnsx", "katana", "naabu", "asnmap", "tlsx", "cdncheck"]
+# Outils "qui vérifient" + glue + alertes (détectés par présence)
+EXTRA_TOOLS = ["gau", "ffuf", "interactsh-client", "notify", "dalfox",
+               "trufflehog", "anew", "gf", "qsreplace"]
 
 
 def _has_module(name: str) -> bool:
