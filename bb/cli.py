@@ -6,7 +6,7 @@ import json
 import sys
 from pathlib import Path
 
-from . import (aggregate, doctor, engagement, fleet, journal, recon as recon_mod,
+from . import (aggregate, crossval, doctor, engagement, fleet, journal, recon as recon_mod,
                report as report_mod, sources)
 from .scope import Scope, normalize_host
 
@@ -79,6 +79,12 @@ def main(argv=None) -> int:
     fp.add_argument("--scan", action="store_true", help="passer --scan aux workers")
     fp.add_argument("--out", help="écrire les résultats agrégés (JSON)")
 
+    cv = sub.add_parser("crossval", help="validation croisée: même recon sur 2 nœuds → delta anti-hallucination")
+    cv.add_argument("program")
+    cv.add_argument("--nodes", default="pc1,pc3", help="2 nœuds (défaut pc1,pc3)")
+    cv.add_argument("--key", default="hosts", choices=["hosts", "url_list"])
+    cv.add_argument("--out", help="écrire le delta complet (JSON)")
+
     jp = sub.add_parser("journal", help="historique des tests (le « dictionnaire » du projet)")
     jp.add_argument("action", nargs="?", default="summary", choices=["summary", "list", "add"])
     jp.add_argument("--type", dest="jtype", choices=list(journal.TYPES))
@@ -144,6 +150,36 @@ def main(argv=None) -> int:
         print(f"     Outils dispo: {tools}")
         print(f"     → conteneur isolé du projet : bash scripts/project_run.sh {d.name} doctor")
         print(f"     → recon distribué (fleet)   : bb fleet \"{p.name}\" --nodes pc1,pc3,local")
+        return 0
+
+    if args.cmd == "crossval":
+        feeds, ywh_api = sources.load()
+        progs = aggregate.aggregate(feeds)
+        aggregate.enrich_ywh(progs, ywh_api)
+        q = args.program.lower()
+        m = [p for p in progs if q in p.name.lower() or q in p.handle.lower()]
+        if not m:
+            print(f"Programme '{args.program}' introuvable.", file=sys.stderr)
+            return 1
+        scope = m[0].scope
+        domains = fleet.seed_domains(scope)
+        names = [n.strip() for n in args.nodes.split(",") if n.strip()][:2]
+        if not domains or len(names) < 2:
+            print("crossval nécessite un domaine-graine et 2 nœuds.", file=sys.stderr)
+            return 1
+        dom = domains[0]
+        print(f"Validation croisée de {dom} : {names[0]} vs {names[1]} (recon indépendant)…",
+              file=sys.stderr)
+        d = crossval.cross_verify(dom, scope, fleet.Node(names[0]), fleet.Node(names[1]), key=args.key)
+        print(f"  accord : {d['agreement'] * 100:.0f}%  →  {d['verdict']}")
+        print(f"  consensus (fiable) : {len(d['consensus'])} | "
+              f"delta {names[0]} : {len(d['only_a'])} | delta {names[1]} : {len(d['only_b'])}")
+        if d["only_a"] or d["only_b"]:
+            print("  ⚠️  le delta (vu par un seul nœud) est à revérifier avant de s'y fier.")
+        journal.record("note", args.program, mode="crossval",
+                       agreement=d["agreement"], verdict=d["verdict"])
+        if args.out:
+            Path(args.out).write_text(json.dumps(d, indent=2, ensure_ascii=False))
         return 0
 
     if args.cmd == "fleet":
