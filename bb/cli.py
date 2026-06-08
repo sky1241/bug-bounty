@@ -68,6 +68,7 @@ def main(argv=None) -> int:
     re_.add_argument("--no-checks", action="store_true", help="probe sans les checks basiques")
     re_.add_argument("--scan", action="store_true", help="lancer nuclei si présent (plus intrusif)")
     re_.add_argument("--ports", action="store_true", help="scan de ports naabu (actif/intrusif)")
+    re_.add_argument("--user-agent", help="User-Agent imposé par le programme (ex Xelians: ' -BugBounty-xelians-31337 ')")
     re_.add_argument("--json", action="store_true", help="sortir le JSON sur stdout (mode worker)")
     re_.add_argument("--out", help="écrire le rapport JSON dans un fichier")
 
@@ -309,7 +310,7 @@ def main(argv=None) -> int:
         reports = []
         for dom in domains:
             rep = recon_mod.run(dom, scope, passive_only=args.passive_only,
-                                do_checks=not args.no_checks, do_scan=args.scan, do_ports=args.ports)
+                                do_checks=not args.no_checks, do_scan=args.scan, do_ports=args.ports, user_agent=args.user_agent)
             reports.append(rep)
             journal.record("recon", dom, in_scope=rep["in_scope"], rejected=rep["rejected"],
                            alive=rep.get("alive"), passive_errors=rep.get("passive_errors") or [],

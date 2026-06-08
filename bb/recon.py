@@ -19,6 +19,11 @@ from dataclasses import asdict, dataclass, field
 from .scope import Scope, normalize_host
 
 _UA = "bb-recon/0.1 (authorized bug bounty recon)"
+_active_ua = _UA  # surchargé par run(user_agent=...) — certains programmes IMPOSENT un UA
+
+
+def _ua() -> str:
+    return _active_ua
 
 
 _PD_CACHE: dict[str, str] = {}
@@ -137,7 +142,7 @@ def parse_crtsh(data, domain: str) -> set[str]:
 def _http_get_json(url: str, timeout: int = 30):
     import requests
 
-    r = requests.get(url, timeout=timeout, headers={"User-Agent": _UA})
+    r = requests.get(url, timeout=timeout, headers={"User-Agent": _ua()})
     r.raise_for_status()
     return r.json()
 
@@ -158,7 +163,7 @@ def _from_hackertarget(domain: str) -> set[str]:
     import requests
 
     r = requests.get(f"https://api.hackertarget.com/hostsearch/?q={domain}",
-                     timeout=30, headers={"User-Agent": _UA})
+                     timeout=30, headers={"User-Agent": _ua()})
     r.raise_for_status()
     txt = r.text or ""
     if "error" in txt.lower() or "api count" in txt.lower():
@@ -248,7 +253,7 @@ def _probe_requests(host: str, timeout: int = 10) -> HostResult:
     for scheme in ("https", "http"):
         try:
             r = requests.get(f"{scheme}://{host}", timeout=timeout, allow_redirects=False,
-                             headers={"User-Agent": _UA})
+                             headers={"User-Agent": _ua()})
         except Exception as e:  # noqa: BLE001
             last_err = type(e).__name__
             continue
@@ -282,7 +287,7 @@ def _probe_httpx(hosts, timeout: int = 120):
             # httpx ne suit PAS les redirects par défaut, ce qu'on veut (anti hors-scope).
             [pd_path("httpx") or "httpx", "-silent", "-json", "-status-code", "-title",
              "-web-server", "-tech-detect", "-favicon", "-cdn", "-ip", "-cname",
-             "-no-color", "-rate-limit", "100"],
+             "-no-color", "-rate-limit", "100", "-H", f"User-Agent: {_ua()}"],
             input="\n".join(hosts), capture_output=True, text=True, timeout=timeout)
     except (subprocess.SubprocessError, OSError):
         return [_probe_requests(h) for h in hosts]  # fallback Python, pas d'échec silencieux
@@ -349,7 +354,7 @@ _SEC_HEADERS = ("content-security-policy", "strict-transport-security",
 def _get(url, timeout=10):
     import requests
 
-    return requests.get(url, timeout=timeout, allow_redirects=False, headers={"User-Agent": _UA})
+    return requests.get(url, timeout=timeout, allow_redirects=False, headers={"User-Agent": _ua()})
 
 
 def katana_crawl(hosts, scope: Scope, *, depth: int = 2, timeout: int = 300):
@@ -439,12 +444,15 @@ def basic_checks(result: HostResult, scope: Scope, *, get=_get) -> list:
 # ── Orchestration ───────────────────────────────────────────────────────────
 def run(domain: str, scope: Scope, *, passive_only: bool = False, do_checks: bool = True,
         do_scan: bool = False, do_ports: bool = False, prober=None, use_tools: bool = True,
-        collect_urls: bool = True) -> dict:
+        collect_urls: bool = True, user_agent: str | None = None) -> dict:
     """Recon → probe → (checks/scan). Tout est filtré par le scope à chaque étape.
 
     Hybride : `prober=None` + httpx présent → httpx (Go) ; sinon fallback requests.
     Passer un `prober` explicite force la voie Python (utilisé par les tests).
+    `user_agent` : certains programmes IMPOSENT un User-Agent précis (règle de chasse).
     """
+    global _active_ua
+    _active_ua = user_agent or _UA
     subs, passive_errors = passive_subdomains(domain)
     in_scope, rejected = enforce_scope(subs | {domain}, scope)
     cnames = {}
