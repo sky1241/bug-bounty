@@ -6,8 +6,8 @@ import json
 import sys
 from pathlib import Path
 
-from . import (aggregate, crossval, doctor, engagement, fleet, journal, recon as recon_mod,
-               report as report_mod, sources)
+from . import (aggregate, crossval, doctor, engagement, fleet, freshness, journal,
+               recon as recon_mod, report as report_mod, sources)
 from .scope import Scope, normalize_host
 
 
@@ -44,6 +44,10 @@ def main(argv=None) -> int:
     lp.add_argument("--min-bounty", type=float, default=0)
     lp.add_argument("--sort", choices=["bounty", "surface"], default="bounty")
     lp.add_argument("--limit", type=int, default=25)
+
+    np = sub.add_parser("new", help="offres AJOUTÉES depuis le dernier passage (fraîcheur)")
+    np.add_argument("--platform", help="filtrer par plateforme")
+    np.add_argument("--fr", action="store_true", help="nouvelles offres FR uniquement")
 
     sc = sub.add_parser("scope", help="afficher le scope d'un programme")
     sc.add_argument("query", help="sous-chaîne du nom ou du handle")
@@ -99,6 +103,29 @@ def main(argv=None) -> int:
         print("Téléchargement des feeds (bounty-targets-data + API YesWeHack)…")
         sources.update()
         print("OK. Cache: data/programs/")
+        return 0
+
+    if args.cmd == "new":
+        feeds, ywh_api = sources.load()
+        if not feeds:
+            print("Aucun feed. Lance `bb update`.", file=sys.stderr)
+            return 1
+        progs = aggregate.aggregate(feeds)
+        aggregate.enrich_ywh(progs, ywh_api)
+        new, first = freshness.new_programs(progs)
+        if args.platform:
+            new = [p for p in new if p.platform == args.platform]
+        if args.fr:
+            new = [p for p in new if p.country == "FR"]
+        if first:
+            print("Premier passage : base initialisée. Les nouvelles offres apparaîtront au prochain `bb update`.")
+            return 0
+        if not new:
+            print("Aucune nouvelle offre depuis le dernier passage. ✅")
+            return 0
+        print(f"🆕 {len(new)} nouvelle(s) offre(s) :")
+        for p in sorted(new, key=lambda p: (p.max_bounty or 0), reverse=True)[:40]:
+            print(f"  {p.platform:10} {p.bounty_str:>11} {(p.country or '--'):2}  {p.name[:45]}")
         return 0
 
     if args.cmd == "doctor":
