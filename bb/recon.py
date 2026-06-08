@@ -452,7 +452,9 @@ def run(domain: str, scope: Scope, *, passive_only: bool = False, do_checks: boo
     `user_agent` : certains programmes IMPOSENT un User-Agent précis (règle de chasse).
     """
     global _active_ua
-    _active_ua = user_agent or _UA
+    # .strip(): un UA avec espaces en tête/fin (ex Xelians ' -BugBounty-xelians-31337 ')
+    # fait planter requests (InvalidHeader). Le marqueur reste reconnu sans les espaces.
+    _active_ua = (user_agent or _UA).strip()
     subs, passive_errors = passive_subdomains(domain)
     in_scope, rejected = enforce_scope(subs | {domain}, scope)
     cnames = {}
