@@ -159,6 +159,17 @@ def main(argv=None) -> int:
               f"pays={p.country or '?'}  →  {verdict}")
         print(f"  scope: {p.in_scope_count} règles ({p.wildcard_count} wildcards), "
               f"web={p.web_surface}, cash={p.pays_cash}")
+        sat = p.reports_count
+        if sat is None:
+            sat_str = "❓ inconnue (feed sans la donnée — NE PAS deviner « frais »)"
+        elif sat >= 100:
+            sat_str = f"⚠️  {sat} rapports = CHASSÉ"
+        elif sat >= 30:
+            sat_str = f"🟡 {sat} rapports = moyen"
+        else:
+            sat_str = f"✅ {sat} rapports = frais"
+        maj = f" · maj {p.last_update}" if p.last_update else ""
+        print(f"  saturation: {sat_str}{maj}   (⚠️ le score n'est PAS une mesure de concurrence)")
         seen = engagement.exists(p.name)
         prev = journal.search(p.name, "recon")
         if seen or prev:
