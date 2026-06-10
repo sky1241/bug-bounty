@@ -17,12 +17,36 @@ YWH_API = "https://api.yeswehack.com/programs"
 DATA_DIR = Path(__file__).resolve().parent.parent / "data" / "programs"
 
 
-def _fetch(url: str, timeout: int = 60):
+def _fetch(url: str, timeout: int = 60, retries: int = 3, backoff: float = 2.0):
+    """GET + parse JSON, avec retry sur erreurs réseau transitoires.
+
+    Un blip passager (reset de connexion, micro-coupure, 5xx) ne doit pas faire
+    échouer la source et déclencher une fausse alerte « source en échec ». On ne
+    lève qu'après `retries` tentatives consécutives. Un 4xx (404…) = erreur
+    permanente => on abandonne tout de suite (retenter ne sert à rien).
+    """
+    import time
+
     import requests  # import paresseux : pas requis pour `list` (lecture du cache)
 
-    r = requests.get(url, timeout=timeout, headers={"User-Agent": "bb-aggregator/0.1"})
-    r.raise_for_status()
-    return r.json()
+    last_exc = None
+    for attempt in range(1, retries + 1):
+        try:
+            r = requests.get(url, timeout=timeout, headers={"User-Agent": "bb-aggregator/0.1"})
+            r.raise_for_status()
+            return r.json()
+        except (requests.ConnectionError, requests.Timeout,
+                requests.exceptions.ChunkedEncodingError) as e:
+            last_exc = e  # transitoire => on retente
+        except requests.HTTPError as e:
+            status = getattr(e.response, "status_code", None)
+            if status is not None and 500 <= status < 600:
+                last_exc = e  # 5xx serveur => transitoire, on retente
+            else:
+                raise  # 4xx => permanent, inutile de retenter
+        if attempt < retries:
+            time.sleep(backoff * attempt)  # backoff linéaire : 2s puis 4s
+    raise last_exc  # tous les essais ont échoué => update() loggue ÉCHEC + alerte
 
 
 def _fetch_ywh_all() -> list:
