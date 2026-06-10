@@ -60,7 +60,7 @@ bb fleet <programme> --nodes pc1,pc3 --scan          # + nuclei sur les workers
 Les feeds de programmes vieillissent. Sur sky-master :
 
 ```bash
-bb update         # à lancer régulièrement (ex: cron quotidien) pour des scopes frais
+bb update         # à lancer régulièrement (cron toutes les heures) pour des scopes frais
 ```
 
 ## État
@@ -69,4 +69,5 @@ bb update         # à lancer régulièrement (ex: cron quotidien) pour des scop
 - ✅ Outils PD (subfinder/httpx/nuclei) déployés sur **pc1 et pc3** (`scripts/deploy_fleet.sh`).
 - ✅ **Fleet prouvée end-to-end** : pc1 (9393 in-scope) et pc3 (3204 in-scope) exécutent le
   recon à distance sur example.com, scope respecté, JSON retourné.
-- ✅ Feeds rafraîchis quotidiennement (cron `bb update` sur sky-master, 06:30).
+- ✅ Feeds rafraîchis toutes les heures (cron `morning_scan.sh` sur sky-master, à HH:30). Source amont
+  `bounty-targets-data` commit ~toutes les 30 min → ce cron est quasi aligné sur la fraîcheur réelle.

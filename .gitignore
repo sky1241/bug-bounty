@@ -37,3 +37,11 @@ engagements/*
 
 # Forge (regression shield) : état local
 .forge/
+
+# Bible d'attaque : arsenal perso de techniques (local).
+# Retire cette ligne si tu veux la rendre publique (ça aide le portfolio).
+attack-bible/
+
+# État généré par le scan matinal (offres/échecs du moment) — transitoire, local.
+NOUVELLES_OFFRES.txt
+SOURCE_EN_ECHEC.txt
