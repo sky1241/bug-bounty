@@ -27,3 +27,23 @@ if ! printf '%s' "$NEW" | grep -qi "aucune nouvelle"; then
   [ -x "$TG" ] && "$TG" "🎯 Bug Bounty — nouvelles offres fraîches ($TS) :
 $NEW" >/dev/null 2>&1 || true
 fi
+
+# 3) Source amont GELÉE ? arkadiyt/bounty-targets-data commit ~toutes les 30 min.
+#    Plus de commit depuis SOURCE_MAX_AGE_H heures => scraper mort/en panne => angle
+#    mort (bb update réussit mais relit un cache figé) => on alerte UNE seule fois.
+SOURCE_MAX_AGE_H=6
+LAST="$(curl -s --max-time 15 'https://api.github.com/repos/arkadiyt/bounty-targets-data/commits?per_page=1' | jq -r '.[0].commit.committer.date' 2>/dev/null)"
+EPOCH="$(date -d "${LAST:-}" +%s 2>/dev/null)"
+if [ -n "$EPOCH" ]; then
+  AGE_H=$(( ( $(date +%s) - EPOCH ) / 3600 ))
+  if [ "$AGE_H" -ge "$SOURCE_MAX_AGE_H" ]; then
+    MSG="⚠️ Source bug-bounty GELÉE : arkadiyt/bounty-targets-data n'a pas bougé depuis ${AGE_H}h (normal ~30 min). Le mec/scraper est peut-être mort → tu rates des offres sans le savoir. Vérifie : https://github.com/arkadiyt/bounty-targets-data/commits"
+    if [ ! -f SOURCE_GELEE.txt ]; then   # 1re détection seulement => pas de spam à chaque scan
+      DISPLAY=:0 notify-send -u critical "⚠️ Bug Bounty — source gelée (${AGE_H}h)" "$MSG" 2>/dev/null || true
+      [ -x "$TG" ] && "$TG" "$MSG" >/dev/null 2>&1 || true
+    fi
+    printf '[%s] %s\n' "$TS" "$MSG" > SOURCE_GELEE.txt
+  else
+    rm -f SOURCE_GELEE.txt   # source vivante => on efface le flag (un futur gel re-alertera)
+  fi
+fi
