@@ -32,9 +32,13 @@ fi
 #    Plus de commit depuis SOURCE_MAX_AGE_H heures => scraper mort/en panne => angle
 #    mort (bb update réussit mais relit un cache figé) => on alerte UNE seule fois.
 SOURCE_MAX_AGE_H=6
-LAST="$(curl -s --max-time 15 'https://api.github.com/repos/arkadiyt/bounty-targets-data/commits?per_page=1' | jq -r '.[0].commit.committer.date' 2>/dev/null)"
-EPOCH="$(date -d "${LAST:-}" +%s 2>/dev/null)"
-if [ -n "$EPOCH" ]; then
+LAST="$(curl -s --max-time 15 --retry 2 --retry-delay 3 'https://api.github.com/repos/arkadiyt/bounty-targets-data/commits?per_page=1' | jq -r '.[0].commit.committer.date' 2>/dev/null)"
+# FIX faux positif : ne traiter QUE si LAST est une vraie date ISO. Si le fetch échoue,
+# LAST est vide et `date -d ""` renvoie MINUIT du jour (exit 0, PAS une erreur) => faux
+# "âge depuis minuit" => fausse alerte qui tombe vers 6h du matin. Le garde regex tue ce
+# chemin : fetch KO / rate-limit / "null" => pas une date ISO => on saute (zéro alerte).
+if printf '%s' "$LAST" | grep -qE '^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}'; then
+  EPOCH="$(date -d "$LAST" +%s 2>/dev/null)"
   AGE_H=$(( ( $(date +%s) - EPOCH ) / 3600 ))
   if [ "$AGE_H" -ge "$SOURCE_MAX_AGE_H" ]; then
     MSG="⚠️ Source bug-bounty GELÉE : arkadiyt/bounty-targets-data n'a pas bougé depuis ${AGE_H}h (normal ~30 min). Le mec/scraper est peut-être mort → tu rates des offres sans le savoir. Vérifie : https://github.com/arkadiyt/bounty-targets-data/commits"
